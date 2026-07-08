@@ -1,0 +1,22 @@
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Dependency directories that may appear in example projects
+node_modules/
+.venv/
+venv/
+__pycache__/
