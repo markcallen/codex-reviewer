@@ -14,32 +14,6 @@ The reviewer focuses on:
 
 It avoids style-only comments unless style hides a real bug.
 
-## What is included
-
-```text
-.
-├── cmd/
-│   └── codex-reviewer/
-├── .codex/
-│   ├── config.toml
-│   └── agents/
-│       └── code-reviewer.toml
-├── AGENTS.md
-├── INSTALL.md
-├── README.md
-├── docs/
-│   ├── code_review.md
-│   └── sources.md
-├── prompts/
-│   ├── review-branch.md
-│   ├── review-commit.md
-│   ├── review-pr.md
-│   └── review-uncommitted.md
-└── scripts/
-    ├── install-global.sh
-    └── install-project.sh
-```
-
 ## Quick start
 
 Build the self-contained CLI:
