@@ -18,6 +18,8 @@ It avoids style-only comments unless style hides a real bug.
 
 ```text
 .
+├── cmd/
+│   └── codex-reviewer/
 ├── .codex/
 │   ├── config.toml
 │   └── agents/
@@ -40,10 +42,28 @@ It avoids style-only comments unless style hides a real bug.
 
 ## Quick start
 
-Install this setup into a target repository:
+Build the self-contained CLI:
 
 ```bash
-./scripts/install-project.sh /path/to/your/repo
+make build
+```
+
+Preview the install into a target repository:
+
+```bash
+bin/codex-reviewer install --dry-run /path/to/your/repo
+```
+
+Install this setup into the target repository:
+
+```bash
+bin/codex-reviewer install /path/to/your/repo
+```
+
+Check whether a repository is set up correctly:
+
+```bash
+bin/codex-reviewer doctor /path/to/your/repo
 ```
 
 Then commit the files in the target repository:
@@ -76,6 +96,25 @@ To make the reviewer available across repositories:
 
 Then add the printed config block to `~/.codex/config.toml`.
 
+## Installer behavior
+
+The Go CLI embeds all artifacts required for project installation, so the built binary can be copied and run without this source checkout.
+
+It is intentionally non-destructive:
+
+- Missing files are created.
+- Existing `.codex/config.toml` files are merged with only the missing review-related settings.
+- Existing `AGENTS.md` and `docs/code_review.md` files are extended with marked managed sections.
+- Existing agent and prompt files that differ from the bundled artifacts are kept unchanged and reported as warnings.
+- Running the installer repeatedly is idempotent.
+
+Build versions are injected with Go linker flags. By default, `make build` uses `git describe --tags --always --dirty`; release builds can pass an explicit tag:
+
+```bash
+make build VERSION=v1.0.0
+bin/codex-reviewer version
+```
+
 ## Model choice
 
 The reviewer uses:
@@ -87,6 +126,48 @@ sandbox_mode = "read-only"
 ```
 
 Use a smaller/faster model only when you want lightweight review. For high-signal reviews before merge, keep the default.
+
+## Running tests during review without editing code
+
+Some test runners need writable scratch space even when they do not modify source
+files. Jest, for example, may write a haste map under `/tmp`. A pure
+`sandbox_mode = "read-only"` reviewer cannot do that.
+
+On Codex clients that support permission profiles, configure a reviewer profile
+that can read the repository but write only to temporary directories:
+
+```toml
+default_permissions = "review-test"
+
+[permissions.review-test.filesystem]
+":minimal" = "read"
+":workspace_roots" = "read"
+":tmpdir" = "write"
+":slash_tmp" = "write"
+
+[permissions.review-test.network]
+enabled = false
+```
+
+Permission profiles do not compose with the older sandbox settings. If you use
+this profile, remove `sandbox_mode` and `[sandbox_workspace_write]` from the same
+loaded config layer or start Codex without a `--sandbox` override.
+
+For older Codex clients, the practical fallback is:
+
+```toml
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+network_access = false
+```
+
+Keep the reviewer prompt instruction `Do not edit files` in place. This fallback
+allows local commands such as Jest to create caches, but it relies on reviewer
+instructions rather than filesystem policy to avoid source edits.
 
 ## Built-in `/review`
 

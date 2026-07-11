@@ -1,0 +1,1 @@
+Review my uncommitted changes. Spawn the code_reviewer subagent in read-only mode, inspect staged, unstaged, and untracked changes, wait for it to finish, then summarize prioritized findings with file references and suggested fixes. Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.

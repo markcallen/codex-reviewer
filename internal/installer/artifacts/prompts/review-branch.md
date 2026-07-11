@@ -1,0 +1,1 @@
+Review this branch against main. Spawn the code_reviewer subagent, have it inspect the diff and relevant surrounding code in read-only mode, wait for it to finish, then summarize prioritized findings with file references and suggested fixes. Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.

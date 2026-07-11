@@ -9,6 +9,7 @@ Thumbs.db
 *.tmp
 *.swp
 *.swo
+bin/
 
 # Local env files
 .env
