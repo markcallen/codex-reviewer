@@ -70,6 +70,33 @@ To make the reviewer available across repositories:
 
 Then add the printed config block to `~/.codex/config.toml`.
 
+## Docker and GHCR
+
+For a local container workflow without kind, build the reviewer image:
+
+```bash
+make docker-build-runner
+```
+
+Publish it to GHCR:
+
+```bash
+export GHCR_IMAGE=ghcr.io/<owner>/codex-code-reviewer
+export GHCR_TAG=v0.1.0
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
+```
+
+Run a review from any checked-out repository:
+
+```bash
+export OPENAI_API_KEY=...
+export GITHUB_TOKEN=...
+make docker-run-review DOCKER_RUN_IMAGE="$GHCR_IMAGE:$GHCR_TAG"
+```
+
+See `docs/docker-ghcr.md` for the raw Docker commands and options.
+
 ## Installer behavior
 
 The Go CLI embeds all artifacts required for project installation, so the built binary can be copied and run without this source checkout.

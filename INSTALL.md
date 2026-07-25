@@ -120,7 +120,35 @@ To use the reviewer in every repo without committing project files:
 
 This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml` and prints the config block to add to `~/.codex/config.toml`.
 
-## 7. Run it
+## 7. Docker and GHCR local option
+
+For individual developers who want an isolated local runtime without kind, build
+the reviewer image:
+
+```bash
+make docker-build-runner
+```
+
+Publish the image to GHCR:
+
+```bash
+export GHCR_IMAGE=ghcr.io/<owner>/codex-code-reviewer
+export GHCR_TAG=v0.1.0
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
+```
+
+Run a review from the repository being reviewed:
+
+```bash
+export OPENAI_API_KEY=...
+export GITHUB_TOKEN=...
+make docker-run-review DOCKER_RUN_IMAGE="$GHCR_IMAGE:$GHCR_TAG"
+```
+
+See `docs/docker-ghcr.md` for the raw Docker command and runtime options.
+
+## 8. Run it
 
 Interactive:
 
@@ -155,7 +183,7 @@ Built-in local reviewer:
 
 The `review_model = "gpt-5.5"` setting makes `/review` use GPT-5.5 even if your current session model is different.
 
-## 8. Optional GitHub usage
+## 9. Optional GitHub usage
 
 For GitHub PR reviews through Codex cloud, set up Codex cloud for the repository, enable Code review in Codex settings, and add review guidance to `AGENTS.md`. You can request a review in a PR comment with:
 
