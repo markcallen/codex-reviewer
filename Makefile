@@ -90,6 +90,16 @@ check-deps:
 	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/check-dev-deps.sh
 
 check-e2e-deps: check-deps
+	@if [ -n "$${OPENAI_API_KEY:-}" ]; then \
+		printf '%-10s required=%-18s found=%-24s %s\n' openai-key set set OK; \
+	else \
+		printf '%-10s required=%-18s found=%-24s %s\n' openai-key set missing FAIL; exit 1; \
+	fi
+	@if [ -n "$${GITHUB_TOKEN:-}" ]; then \
+		printf '%-10s required=%-18s found=%-24s %s\n' github-tok set set OK; \
+	else \
+		printf '%-10s required=%-18s found=%-24s %s\n' github-tok set missing FAIL; exit 1; \
+	fi
 	@if gh auth status >/dev/null 2>&1; then \
 		printf '%-10s required=%-18s found=%-24s %s\n' gh-auth authenticated authenticated OK; \
 	else \

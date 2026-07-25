@@ -47,6 +47,8 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 
 	ensureKindCluster(t, ctx, cluster)
 	ensureNamespace(t, ctx, namespace)
+	ensureSecretFromEnv(t, ctx, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+	ensureSecretFromEnv(t, ctx, namespace, githubSecret, "token", "GITHUB_TOKEN")
 
 	fixtures := loadFixtures(t)
 	cases := []repoFixture{fixtures.Small[0], fixtures.Large[0]}
@@ -74,8 +76,15 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			if err != nil {
 				t.Fatalf("JobManifest() error = %v", err)
 			}
+			jobName := service.JobName("e2e-" + sanitizeName(repo.Name))
+			deleteJobIfExists(t, ctx, namespace, jobName)
 			applyManifest(t, ctx, manifest)
-			waitForJob(t, ctx, namespace, "codex-review-e2e-"+sanitizeName(repo.Name))
+			t.Cleanup(func() {
+				deleteJobIfExists(t, context.Background(), namespace, jobName)
+			})
+			waitForReviewerContainer(t, ctx, namespace, jobName, 40*time.Minute)
+			logs := output(t, ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
+			assertReviewRan(t, string(logs))
 		})
 	}
 }
@@ -101,6 +110,22 @@ func ensureNamespace(t *testing.T, ctx context.Context, namespace string) {
 	run(t, ctx, "", "kubectl", "create", "namespace", namespace)
 }
 
+func ensureSecretFromEnv(t *testing.T, ctx context.Context, namespace, secret, key, envName string) {
+	t.Helper()
+	value := requireEnv(t, envName)
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, key)
+	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+	cmd := command(ctx, "", "kubectl", "-n", namespace, "create", "secret", "generic", secret, "--from-file="+key+"="+path, "--dry-run=client", "-o", "yaml")
+	yaml, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("kubectl create secret %s failed: %v", secret, err)
+	}
+	applyManifest(t, ctx, yaml)
+}
+
 func applyManifest(t *testing.T, ctx context.Context, manifest []byte) {
 	t.Helper()
 	cmd := command(ctx, "", "kubectl", "apply", "-f", "-")
@@ -111,9 +136,41 @@ func applyManifest(t *testing.T, ctx context.Context, manifest []byte) {
 	}
 }
 
-func waitForJob(t *testing.T, ctx context.Context, namespace, name string) {
+func waitForReviewerContainer(t *testing.T, ctx context.Context, namespace, jobName string, timeout time.Duration) {
 	t.Helper()
-	run(t, ctx, "", "kubectl", "-n", namespace, "wait", "--for=condition=complete", "job/"+name, "--timeout=40m")
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		out := output(t, ctx, "", "kubectl", "-n", namespace, "get", "pods", "-l", "job-name="+jobName, "-o", "jsonpath={.items[0].status.containerStatuses[?(@.name=='reviewer')].state.terminated.exitCode}")
+		exitCode := strings.TrimSpace(string(out))
+		switch exitCode {
+		case "":
+			time.Sleep(5 * time.Second)
+			continue
+		case "0":
+			return
+		default:
+			logs := output(t, ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
+			t.Fatalf("reviewer container exited with %s\n%s", exitCode, logs)
+		}
+	}
+	logs, _ := command(ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+	t.Fatalf("reviewer container did not finish within %s\n%s", timeout, logs)
+}
+
+func deleteJobIfExists(t *testing.T, ctx context.Context, namespace, jobName string) {
+	t.Helper()
+	_ = command(ctx, "", "kubectl", "-n", namespace, "delete", "job", jobName, "--ignore-not-found=true").Run()
+}
+
+func assertReviewRan(t *testing.T, logs string) {
+	t.Helper()
+	if strings.Contains(logs, "Block") || strings.Contains(logs, "Approve with fixes") || strings.Contains(logs, "No blocking findings") {
+		return
+	}
+	if strings.Contains(logs, "codex-reviewer: wrote") {
+		return
+	}
+	t.Fatalf("reviewer logs did not include a review verdict or report write confirmation:\n%s", logs)
 }
 
 func defaultBranch(t *testing.T, ctx context.Context, repo string) (string, string) {

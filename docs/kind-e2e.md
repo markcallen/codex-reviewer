@@ -13,8 +13,8 @@ five small and five large, selected by GitHub `diskUsage`.
 - `gh` authenticated with access to `github.com/markcallen`
 - A review runner image loaded into kind
 - An OpenAI egress sidecar image loaded into kind
-- A Kubernetes Secret containing the model API credential
-- A Kubernetes Secret containing a GitHub token for private repository clones
+- `OPENAI_API_KEY` set in the local environment
+- `GITHUB_TOKEN` set in the local environment for private repository clones
 
 ## Environment
 
@@ -44,6 +44,8 @@ kind load docker-image openai-egress:phase1 --name codex-reviewer-e2e
 
 ```bash
 export RUN_KIND_E2E=1
+export OPENAI_API_KEY=...
+export GITHUB_TOKEN=...
 export CODEX_REVIEWER_REVIEWER_IMAGE=codex-reviewer:phase1
 export CODEX_REVIEWER_SIDECAR_IMAGE=openai-egress:phase1
 export CODEX_REVIEWER_OPENAI_SECRET=openai-api
@@ -65,8 +67,10 @@ go test -tags=e2e ./e2e -run TestKindReviewsSmallAndLargePrivateRepos -count=1
 ```
 
 The test creates a kind cluster if one does not exist, creates the configured
-namespace if needed, resolves each selected repository's default branch SHA with
-`gh`, creates a one-shot Kubernetes Job manifest, applies it, and waits for the
-Job to complete.
+namespace if needed, creates the configured Kubernetes Secrets from
+`OPENAI_API_KEY` and `GITHUB_TOKEN`, resolves each selected repository's default
+branch SHA with `gh`, creates a one-shot Kubernetes Job manifest, applies it,
+waits for the reviewer container to finish, reads the reviewer logs, and asserts
+that a review verdict or report write confirmation was produced.
 
 The test skips by default unless `RUN_KIND_E2E=1` is set.
