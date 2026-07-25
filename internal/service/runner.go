@@ -146,6 +146,12 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 }
 
 func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewRequest, reportPath string) error {
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		rewrite := "url.https://x-access-token:" + token + "@github.com/.insteadOf"
+		if err := opts.Runner.Run(ctx, "", "git", "config", "--global", rewrite, "https://github.com/"); err != nil {
+			return fmt.Errorf("configure GitHub credentials: %w", err)
+		}
+	}
 	if err := opts.Runner.Run(ctx, "", "git", "clone", "--no-checkout", req.RepoURL, opts.Workspace); err != nil {
 		return fmt.Errorf("clone repository: %w", err)
 	}

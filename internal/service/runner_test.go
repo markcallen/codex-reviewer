@@ -49,6 +49,7 @@ func (e *fakeError) Error() string {
 }
 
 func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
 	out := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	req := testRunnerRequest(t)
@@ -98,6 +99,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 }
 
 func TestRunReviewJobWritesFailureMetadata(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
 	out := t.TempDir()
 	req := testRunnerRequest(t)
 	requestJSON, err := req.JSON()
@@ -120,6 +122,37 @@ func TestRunReviewJobWritesFailureMetadata(t *testing.T) {
 	}
 	if !strings.Contains(metadata.Error, "clone repository") {
 		t.Fatalf("metadata.Error = %q", metadata.Error)
+	}
+}
+
+func TestRunReviewJobConfiguresGitHubTokenWhenPresent(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	out := t.TempDir()
+	req := testRunnerRequest(t)
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	runner := &fakeCommandRunner{}
+
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   out,
+		Runner:      runner,
+	})
+	if err != nil {
+		t.Fatalf("RunReviewJob() error = %v", err)
+	}
+	if len(runner.commands) == 0 {
+		t.Fatal("no commands were recorded")
+	}
+	first := runner.commands[0]
+	if first.Name != "git" || len(first.Args) < 3 || first.Args[0] != "config" {
+		t.Fatalf("first command did not configure git credentials: %#v", first)
+	}
+	if !strings.Contains(strings.Join(first.Args, " "), "x-access-token") {
+		t.Fatalf("git credential command missing token username: %#v", first.Args)
 	}
 }
 

@@ -15,6 +15,7 @@ func TestJobManifestIncludesReviewerAndSidecar(t *testing.T) {
 		SidecarImage:     "registry.local/openai-egress:phase1",
 		ServiceAccount:   "codex-reviewer",
 		OpenAISecretName: "openai-api",
+		GitHubSecretName: "github-token",
 	})
 	if err != nil {
 		t.Fatalf("JobManifest() error = %v", err)
@@ -56,6 +57,9 @@ func TestJobManifestIncludesReviewerAndSidecar(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "secretKeyRef") {
 		t.Fatalf("manifest missing secret reference:\n%s", data)
+	}
+	if !strings.Contains(string(data), "GITHUB_TOKEN") {
+		t.Fatalf("manifest missing GitHub token env:\n%s", data)
 	}
 	if strings.Contains(string(data), "sk-") {
 		t.Fatalf("manifest appears to contain a raw API key:\n%s", data)

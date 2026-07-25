@@ -1,0 +1,59 @@
+{
+  "selected_at": "2026-07-25T00:00:00Z",
+  "source": "gh repo list markcallen --limit 100 --json nameWithOwner,isPrivate,diskUsage,updatedAt,url",
+  "small": [
+    {
+      "name": "markcallen/rpi-k3s-cluster",
+      "url": "https://github.com/markcallen/rpi-k3s-cluster",
+      "disk_usage_kb": 8
+    },
+    {
+      "name": "markcallen/project-organizer",
+      "url": "https://github.com/markcallen/project-organizer",
+      "disk_usage_kb": 35
+    },
+    {
+      "name": "markcallen/sudoku",
+      "url": "https://github.com/markcallen/sudoku",
+      "disk_usage_kb": 48
+    },
+    {
+      "name": "markcallen/sujiko",
+      "url": "https://github.com/markcallen/sujiko",
+      "disk_usage_kb": 84
+    },
+    {
+      "name": "markcallen/chatgpt-mcp-example",
+      "url": "https://github.com/markcallen/chatgpt-mcp-example",
+      "disk_usage_kb": 69
+    }
+  ],
+  "large": [
+    {
+      "name": "markcallen/turtleislandcottage",
+      "url": "https://github.com/markcallen/turtleislandcottage",
+      "disk_usage_kb": 16173
+    },
+    {
+      "name": "markcallen/collabmark-app",
+      "url": "https://github.com/markcallen/collabmark-app",
+      "disk_usage_kb": 12436
+    },
+    {
+      "name": "markcallen/devops",
+      "url": "https://github.com/markcallen/devops",
+      "disk_usage_kb": 12391
+    },
+    {
+      "name": "markcallen/newco",
+      "url": "https://github.com/markcallen/newco",
+      "disk_usage_kb": 10150
+    },
+    {
+      "name": "markcallen/knowledge-graph",
+      "url": "https://github.com/markcallen/knowledge-graph",
+      "disk_usage_kb": 7270
+    }
+  ]
+}
+

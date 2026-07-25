@@ -15,6 +15,8 @@ type JobOptions struct {
 	ServiceAccount        string
 	OpenAISecretName      string
 	OpenAISecretKey       string
+	GitHubSecretName      string
+	GitHubSecretKey       string
 	ProxyURL              string
 	ActiveDeadlineSeconds int
 	TTLSeconds            int
@@ -36,6 +38,9 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 	if opts.OpenAISecretKey == "" {
 		opts.OpenAISecretKey = "api-key"
 	}
+	if opts.GitHubSecretName != "" && opts.GitHubSecretKey == "" {
+		opts.GitHubSecretKey = "token"
+	}
 	if opts.ProxyURL == "" {
 		opts.ProxyURL = "http://127.0.0.1:8888"
 	}
@@ -49,6 +54,26 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 	requestJSON, err := req.JSON()
 	if err != nil {
 		return nil, err
+	}
+
+	reviewerEnv := []any{
+		map[string]string{"name": "REVIEW_ID", "value": opts.ReviewID},
+		map[string]string{"name": "REVIEW_REQUEST_JSON", "value": string(requestJSON)},
+		map[string]string{"name": "REVIEW_OUTPUT_DIR", "value": "/out"},
+		map[string]string{"name": "HTTPS_PROXY", "value": opts.ProxyURL},
+		map[string]string{"name": "HTTP_PROXY", "value": opts.ProxyURL},
+		map[string]string{"name": "ALL_PROXY", "value": opts.ProxyURL},
+	}
+	if opts.GitHubSecretName != "" {
+		reviewerEnv = append(reviewerEnv, map[string]any{
+			"name": "GITHUB_TOKEN",
+			"valueFrom": map[string]any{
+				"secretKeyRef": map[string]string{
+					"name": opts.GitHubSecretName,
+					"key":  opts.GitHubSecretKey,
+				},
+			},
+		})
 	}
 
 	job := map[string]any{
@@ -76,14 +101,7 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 							"name":  "reviewer",
 							"image": opts.ReviewerImage,
 							"args":  []string{"service", "runner"},
-							"env": []any{
-								map[string]string{"name": "REVIEW_ID", "value": opts.ReviewID},
-								map[string]string{"name": "REVIEW_REQUEST_JSON", "value": string(requestJSON)},
-								map[string]string{"name": "REVIEW_OUTPUT_DIR", "value": "/out"},
-								map[string]string{"name": "HTTPS_PROXY", "value": opts.ProxyURL},
-								map[string]string{"name": "HTTP_PROXY", "value": opts.ProxyURL},
-								map[string]string{"name": "ALL_PROXY", "value": opts.ProxyURL},
-							},
+							"env":   reviewerEnv,
 							"volumeMounts": []any{
 								map[string]string{"name": "workspace", "mountPath": "/workspace"},
 								map[string]string{"name": "out", "mountPath": "/out"},
