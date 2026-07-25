@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
@@ -93,6 +95,8 @@ func runService(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "api":
+		runServiceAPI(args[1:])
 	case "submit":
 		runServiceSubmit(args[1:])
 	case "job-manifest":
@@ -105,6 +109,41 @@ func runService(args []string) {
 		fmt.Fprintf(os.Stderr, "unknown service command: %s\n\n", args[0])
 		serviceUsage()
 		os.Exit(2)
+	}
+}
+
+func runServiceAPI(args []string) {
+	var listen string
+	var jobOpts service.JobOptions
+	fs := flag.NewFlagSet("service api", flag.ExitOnError)
+	fs.StringVar(&listen, "listen", ":8080", "HTTP listen address")
+	fs.StringVar(&jobOpts.Namespace, "namespace", "", "Kubernetes namespace for review jobs")
+	fs.StringVar(&jobOpts.ReviewerImage, "reviewer-image", "", "review runner image")
+	fs.StringVar(&jobOpts.SidecarImage, "sidecar-image", "", "OpenAI egress sidecar image")
+	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account for review jobs")
+	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
+	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
+	fs.StringVar(&jobOpts.ProxyURL, "proxy-url", "", "proxy URL exposed by the sidecar")
+	fs.IntVar(&jobOpts.ActiveDeadlineSeconds, "active-deadline-seconds", 0, "job activeDeadlineSeconds")
+	fs.IntVar(&jobOpts.TTLSeconds, "ttl-seconds", 0, "ttlSecondsAfterFinished")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service api [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	server, err := service.NewAPIServer(service.APIOptions{JobOptions: jobOpts})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configure service api failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stdout, "codex-reviewer: listening on %s\n", listen)
+	if err := http.ListenAndServe(listen, server.Handler()); err != nil {
+		fmt.Fprintf(os.Stderr, "service api failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -196,9 +235,11 @@ func runServiceJobManifest(args []string) {
 func runServiceSubmit(args []string) {
 	var opts service.SubmitOptions
 	var output string
+	var apiURL string
 	var dryRun bool
 	var wait bool
 	fs := flag.NewFlagSet("service submit", flag.ExitOnError)
+	fs.StringVar(&apiURL, "api-url", os.Getenv("CODEX_REVIEWER_API_URL"), "review API base URL; defaults to CODEX_REVIEWER_API_URL")
 	fs.StringVar(&opts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
 	fs.StringVar(&opts.BaseRef, "base", "", "base branch/ref; defaults to origin/main")
 	fs.StringVar(&opts.HeadRef, "head", "", "head branch/ref; defaults to HEAD")
@@ -242,9 +283,25 @@ func runServiceSubmit(args []string) {
 	if dryRun {
 		return
 	}
-	_ = wait
-	fmt.Fprintln(os.Stderr, "service submit is not connected to the review API yet; rerun with --dry-run")
-	os.Exit(1)
+	if apiURL == "" {
+		fmt.Fprintln(os.Stderr, "service submit requires --api-url or CODEX_REVIEWER_API_URL; use --dry-run to inspect the request")
+		os.Exit(1)
+	}
+	resp, err := service.Client{BaseURL: apiURL}.Submit(context.Background(), req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "submit review failed: %v\n", err)
+		os.Exit(1)
+	}
+	if wait {
+		fmt.Fprintln(os.Stderr, "--wait polling is not implemented yet; review has been submitted")
+	}
+	respData, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "encode review response failed: %v\n", err)
+		os.Exit(1)
+	}
+	respData = append(respData, '\n')
+	fmt.Print(string(respData))
 }
 
 func runReview(args []string) {
@@ -413,6 +470,7 @@ Usage:
   codex-reviewer install [flags] /path/to/project
   codex-reviewer doctor [flags] /path/to/project
   codex-reviewer review pre-push [flags]
+  codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
@@ -444,6 +502,7 @@ func serviceUsage() {
 	fmt.Fprintf(os.Stderr, `codex-reviewer service
 
 Usage:
+  codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
