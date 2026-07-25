@@ -9,6 +9,7 @@ import (
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/service"
+	"github.com/everydaydevops/codex-code-reviewer/internal/workflow"
 )
 
 var version = "dev"
@@ -28,6 +29,8 @@ func main() {
 		runReview(os.Args[2:])
 	case "service":
 		runService(os.Args[2:])
+	case "workflow":
+		runWorkflow(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -36,6 +39,51 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
 		usage()
 		os.Exit(2)
+	}
+}
+
+func runWorkflow(args []string) {
+	if len(args) == 0 {
+		workflowUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "run":
+		runWorkflowRun(args[1:])
+	case "-h", "--help", "help":
+		workflowUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown workflow command: %s\n\n", args[0])
+		workflowUsage()
+		os.Exit(2)
+	}
+}
+
+func runWorkflowRun(args []string) {
+	var opts workflow.Options
+	fs := flag.NewFlagSet("workflow run", flag.ExitOnError)
+	fs.StringVar(&opts.CommitMessage, "commit-message", "", "commit message for git commit")
+	fs.StringVar(&opts.UnitTest, "unit-test", "", "unit test command")
+	fs.StringVar(&opts.Review, "review", "", "review command; defaults to service submit")
+	fs.StringVar(&opts.Fix, "fix", "", "fix command to run after review")
+	fs.StringVar(&opts.E2E, "e2e-test", "", "e2e test command")
+	fs.BoolVar(&opts.Push, "push", false, "push to the configured remote after e2e tests pass")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print commands without running them")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer workflow run [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Stdout = os.Stdout
+	opts.Stderr = os.Stderr
+	if err := workflow.Run(context.Background(), opts); err != nil {
+		fmt.Fprintf(os.Stderr, "workflow failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -368,6 +416,7 @@ Usage:
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
+  codex-reviewer workflow run [flags]
   codex-reviewer version
 
 `, version)
@@ -378,6 +427,15 @@ func reviewUsage() {
 
 Usage:
   codex-reviewer review pre-push [flags]
+
+`)
+}
+
+func workflowUsage() {
+	fmt.Fprintf(os.Stderr, `codex-reviewer workflow
+
+Usage:
+  codex-reviewer workflow run [flags]
 
 `)
 }
