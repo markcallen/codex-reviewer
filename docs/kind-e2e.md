@@ -21,7 +21,7 @@ five small and five large, selected by GitHub `diskUsage`.
 The Makefile drives the standard setup path:
 
 ```bash
-make check-deps
+make setup
 make setup-e2e
 make e2e
 ```
@@ -35,9 +35,10 @@ docker build -f Dockerfile.runner -t codex-reviewer:phase1 .
 kind load docker-image codex-reviewer:phase1 --name codex-reviewer-e2e
 ```
 
-Build or provide an egress proxy image and load it into kind:
+Build and load the egress proxy image:
 
 ```bash
+docker build -f Dockerfile.egress -t openai-egress:phase1 .
 kind load docker-image openai-egress:phase1 --name codex-reviewer-e2e
 ```
 

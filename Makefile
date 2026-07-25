@@ -2,6 +2,11 @@ BINARY := bin/codex-reviewer
 PKG := ./cmd/codex-reviewer
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
+export PATH := $(CURDIR)/bin:$(CURDIR)/.tools/go/bin:$(PATH)
+GO_MIN_VERSION ?= 1.25
+GO_INSTALL_VERSION ?= 1.25.0
+KIND_VERSION ?= v0.30.0
+KUBECTL_VERSION ?= stable
 
 KIND_CLUSTER ?= codex-reviewer-e2e
 NAMESPACE ?= codex-reviewer-e2e
@@ -14,28 +19,36 @@ GITHUB_SECRET ?= github-token
 GITHUB_SECRET_KEY ?= token
 E2E_TEST ?= TestKindReviewsSmallAndLargePrivateRepos
 
-.PHONY: help build test test-e2e deps check-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner kind-load-runner kind-load-sidecar kind-load-images e2e clean clean-kind
+.PHONY: help setup build test test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e clean clean-kind
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
+		'  make setup              Install deps, verify tools, build, and test' \
 		'  make build              Build bin/codex-reviewer' \
 		'  make test               Run unit tests' \
 		'  make test-e2e           Compile e2e tests; skips unless RUN_KIND_E2E=1' \
-		'  make deps               Download Go modules' \
-		'  make check-deps         Verify local tools for kind e2e' \
+		'  make lint               Run gofmt check and go vet' \
+		'  make deps               Install dev tools and download Go modules' \
+		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
 		'  make e2e                Run the kind e2e review test' \
 		'  make clean              Remove local build output' \
 		'  make clean-kind         Delete the kind cluster' \
 		'' \
 		'Common variables:' \
+		'  GO_MIN_VERSION=$(GO_MIN_VERSION)' \
+		'  GO_INSTALL_VERSION=$(GO_INSTALL_VERSION)' \
+		'  KIND_VERSION=$(KIND_VERSION)' \
+		'  KUBECTL_VERSION=$(KUBECTL_VERSION)' \
 		'  KIND_CLUSTER=$(KIND_CLUSTER)' \
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
 		'  OPENAI_SECRET=$(OPENAI_SECRET)' \
 		'  GITHUB_SECRET=$(GITHUB_SECRET)'
+
+setup: deps check-deps build lint test test-e2e
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
@@ -46,19 +59,33 @@ test:
 test-e2e:
 	go test -tags=e2e ./e2e
 
-deps:
+lint:
+	@test -z "$$(gofmt -l cmd internal e2e 2>/dev/null)" || { echo 'gofmt needed:'; gofmt -l cmd internal e2e; exit 1; }
+	go vet ./...
+
+deps: deps-tools deps-go-mod
+
+deps-tools:
+	GO_MIN_VERSION="$(GO_MIN_VERSION)" GO_INSTALL_VERSION="$(GO_INSTALL_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/install-dev-deps.sh
+
+deps-go-mod:
 	go mod download
 
 check-deps:
 	@command -v go >/dev/null || { echo 'missing dependency: go'; exit 1; }
+	@go version | awk -v want="$(GO_MIN_VERSION)" '{ split($$3, v, "go"); split(v[2], got, "."); split(want, req, "."); if ((got[1]+0) < (req[1]+0) || ((got[1]+0) == (req[1]+0) && (got[2]+0) < (req[2]+0))) { printf("go %s+ required, found %s\n", want, $$3); exit 1 } }'
+	@command -v gofmt >/dev/null || { echo 'missing dependency: gofmt'; exit 1; }
 	@command -v docker >/dev/null || { echo 'missing dependency: docker'; exit 1; }
 	@command -v kind >/dev/null || { echo 'missing dependency: kind'; exit 1; }
 	@command -v kubectl >/dev/null || { echo 'missing dependency: kubectl'; exit 1; }
 	@command -v gh >/dev/null || { echo 'missing dependency: gh'; exit 1; }
-	@gh auth status >/dev/null
-	@docker image inspect "$(SIDECAR_IMAGE)" >/dev/null || { echo 'missing sidecar image: $(SIDECAR_IMAGE)'; exit 1; }
 
-setup-e2e: check-deps deps kind-service-account kind-load-images kind-secrets
+check-e2e-deps: check-deps
+	@gh auth status >/dev/null
+	@docker image inspect "$(RUNNER_IMAGE)" >/dev/null || { echo 'missing runner image: $(RUNNER_IMAGE). Run make docker-build-runner'; exit 1; }
+	@docker image inspect "$(SIDECAR_IMAGE)" >/dev/null || { echo 'missing sidecar image: $(SIDECAR_IMAGE). Run make docker-build-sidecar'; exit 1; }
+
+setup-e2e: check-deps deps-go-mod kind-service-account kind-load-images kind-secrets
 
 kind-create:
 	@if kind get clusters | grep -qx "$(KIND_CLUSTER)"; then \
@@ -90,15 +117,18 @@ kind-secrets: kind-namespace
 docker-build-runner: build
 	docker build -f Dockerfile.runner -t "$(RUNNER_IMAGE)" .
 
+docker-build-sidecar:
+	docker build -f Dockerfile.egress -t "$(SIDECAR_IMAGE)" .
+
 kind-load-runner: kind-create docker-build-runner
 	kind load docker-image "$(RUNNER_IMAGE)" --name "$(KIND_CLUSTER)"
 
-kind-load-sidecar: kind-create check-deps
+kind-load-sidecar: kind-create docker-build-sidecar
 	kind load docker-image "$(SIDECAR_IMAGE)" --name "$(KIND_CLUSTER)"
 
 kind-load-images: kind-load-runner kind-load-sidecar
 
-e2e:
+e2e: check-e2e-deps
 	RUN_KIND_E2E=1 \
 	CODEX_REVIEWER_REVIEWER_IMAGE="$(RUNNER_IMAGE)" \
 	CODEX_REVIEWER_SIDECAR_IMAGE="$(SIDECAR_IMAGE)" \
