@@ -47,6 +47,8 @@ func runService(args []string) {
 	switch args[0] {
 	case "submit":
 		runServiceSubmit(args[1:])
+	case "job-manifest":
+		runServiceJobManifest(args[1:])
 	case "-h", "--help", "help":
 		serviceUsage()
 	default:
@@ -54,6 +56,60 @@ func runService(args []string) {
 		serviceUsage()
 		os.Exit(2)
 	}
+}
+
+func runServiceJobManifest(args []string) {
+	var submitOpts service.SubmitOptions
+	var jobOpts service.JobOptions
+	var output string
+	fs := flag.NewFlagSet("service job-manifest", flag.ExitOnError)
+	fs.StringVar(&submitOpts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
+	fs.StringVar(&submitOpts.BaseRef, "base", "", "base branch/ref; defaults to origin/main")
+	fs.StringVar(&submitOpts.HeadRef, "head", "", "head branch/ref; defaults to HEAD")
+	fs.StringVar(&submitOpts.HeadSHA, "head-sha", "", "exact head SHA; defaults to resolving --head")
+	fs.StringVar(&submitOpts.ProfileName, "profile", "", "review profile; defaults to standard")
+	fs.StringVar(&submitOpts.Instructions, "instructions", "", "additional review instructions")
+	fs.BoolVar(&submitOpts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
+	fs.StringVar(&jobOpts.ReviewID, "review-id", "", "review id used in the Kubernetes Job name")
+	fs.StringVar(&jobOpts.Namespace, "namespace", "", "Kubernetes namespace")
+	fs.StringVar(&jobOpts.ReviewerImage, "reviewer-image", "", "review runner image")
+	fs.StringVar(&jobOpts.SidecarImage, "sidecar-image", "", "OpenAI egress sidecar image")
+	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account")
+	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
+	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
+	fs.StringVar(&jobOpts.ProxyURL, "proxy-url", "", "proxy URL exposed by the sidecar")
+	fs.IntVar(&jobOpts.ActiveDeadlineSeconds, "active-deadline-seconds", 0, "job activeDeadlineSeconds")
+	fs.IntVar(&jobOpts.TTLSeconds, "ttl-seconds", 0, "ttlSecondsAfterFinished")
+	fs.StringVar(&output, "output", "", "write manifest JSON to this path")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service job-manifest [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	submitOpts.Dir = "."
+	req, err := service.BuildReviewRequest(context.Background(), submitOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build review request failed: %v\n", err)
+		os.Exit(1)
+	}
+	data, err := service.JobManifest(req, jobOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build job manifest failed: %v\n", err)
+		os.Exit(1)
+	}
+	if output != "" {
+		if err := os.WriteFile(output, data, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+			os.Exit(1)
+		}
+		return
+	}
+	fmt.Print(string(data))
 }
 
 func runServiceSubmit(args []string) {
@@ -277,6 +333,7 @@ Usage:
   codex-reviewer doctor [flags] /path/to/project
   codex-reviewer review pre-push [flags]
   codex-reviewer service submit [flags]
+  codex-reviewer service job-manifest [flags]
   codex-reviewer version
 
 `, version)
@@ -296,6 +353,7 @@ func serviceUsage() {
 
 Usage:
   codex-reviewer service submit [flags]
+  codex-reviewer service job-manifest [flags]
 
 `)
 }
