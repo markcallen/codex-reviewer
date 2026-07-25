@@ -72,18 +72,24 @@ deps-go-mod:
 	go mod download
 
 check-deps:
-	@command -v go >/dev/null || { echo 'missing dependency: go'; exit 1; }
-	@go version | awk -v want="$(GO_MIN_VERSION)" '{ split($$3, v, "go"); split(v[2], got, "."); split(want, req, "."); if ((got[1]+0) < (req[1]+0) || ((got[1]+0) == (req[1]+0) && (got[2]+0) < (req[2]+0))) { printf("go %s+ required, found %s\n", want, $$3); exit 1 } }'
-	@command -v gofmt >/dev/null || { echo 'missing dependency: gofmt'; exit 1; }
-	@command -v docker >/dev/null || { echo 'missing dependency: docker'; exit 1; }
-	@command -v kind >/dev/null || { echo 'missing dependency: kind'; exit 1; }
-	@command -v kubectl >/dev/null || { echo 'missing dependency: kubectl'; exit 1; }
-	@command -v gh >/dev/null || { echo 'missing dependency: gh'; exit 1; }
+	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/check-dev-deps.sh
 
 check-e2e-deps: check-deps
-	@gh auth status >/dev/null
-	@docker image inspect "$(RUNNER_IMAGE)" >/dev/null || { echo 'missing runner image: $(RUNNER_IMAGE). Run make docker-build-runner'; exit 1; }
-	@docker image inspect "$(SIDECAR_IMAGE)" >/dev/null || { echo 'missing sidecar image: $(SIDECAR_IMAGE). Run make docker-build-sidecar'; exit 1; }
+	@if gh auth status >/dev/null 2>&1; then \
+		printf '%-10s found=%-24s required=%-18s %s\n' gh-auth authenticated authenticated OK; \
+	else \
+		printf '%-10s found=%-24s required=%-18s %s\n' gh-auth missing authenticated FAIL; exit 1; \
+	fi
+	@if docker image inspect "$(RUNNER_IMAGE)" >/dev/null 2>&1; then \
+		printf '%-10s found=%-24s required=%-18s %s\n' runner-img "$(RUNNER_IMAGE)" "$(RUNNER_IMAGE)" OK; \
+	else \
+		printf '%-10s found=%-24s required=%-18s %s\n' runner-img missing "$(RUNNER_IMAGE)" FAIL; echo 'Run make docker-build-runner'; exit 1; \
+	fi
+	@if docker image inspect "$(SIDECAR_IMAGE)" >/dev/null 2>&1; then \
+		printf '%-10s found=%-24s required=%-18s %s\n' sidecar-img "$(SIDECAR_IMAGE)" "$(SIDECAR_IMAGE)" OK; \
+	else \
+		printf '%-10s found=%-24s required=%-18s %s\n' sidecar-img missing "$(SIDECAR_IMAGE)" FAIL; echo 'Run make docker-build-sidecar'; exit 1; \
+	fi
 
 setup-e2e: check-deps deps-go-mod kind-service-account kind-load-images kind-secrets
 
