@@ -76,19 +76,19 @@ check-deps:
 
 check-e2e-deps: check-deps
 	@if gh auth status >/dev/null 2>&1; then \
-		printf '%-10s found=%-24s required=%-18s %s\n' gh-auth authenticated authenticated OK; \
+		printf '%-10s required=%-18s found=%-24s %s\n' gh-auth authenticated authenticated OK; \
 	else \
-		printf '%-10s found=%-24s required=%-18s %s\n' gh-auth missing authenticated FAIL; exit 1; \
+		printf '%-10s required=%-18s found=%-24s %s\n' gh-auth authenticated missing FAIL; exit 1; \
 	fi
 	@if docker image inspect "$(RUNNER_IMAGE)" >/dev/null 2>&1; then \
-		printf '%-10s found=%-24s required=%-18s %s\n' runner-img "$(RUNNER_IMAGE)" "$(RUNNER_IMAGE)" OK; \
+		printf '%-10s required=%-18s found=%-24s %s\n' runner-img "$(RUNNER_IMAGE)" "$(RUNNER_IMAGE)" OK; \
 	else \
-		printf '%-10s found=%-24s required=%-18s %s\n' runner-img missing "$(RUNNER_IMAGE)" FAIL; echo 'Run make docker-build-runner'; exit 1; \
+		printf '%-10s required=%-18s found=%-24s %s\n' runner-img "$(RUNNER_IMAGE)" missing FAIL; echo 'Run make docker-build-runner'; exit 1; \
 	fi
 	@if docker image inspect "$(SIDECAR_IMAGE)" >/dev/null 2>&1; then \
-		printf '%-10s found=%-24s required=%-18s %s\n' sidecar-img "$(SIDECAR_IMAGE)" "$(SIDECAR_IMAGE)" OK; \
+		printf '%-10s required=%-18s found=%-24s %s\n' sidecar-img "$(SIDECAR_IMAGE)" "$(SIDECAR_IMAGE)" OK; \
 	else \
-		printf '%-10s found=%-24s required=%-18s %s\n' sidecar-img missing "$(SIDECAR_IMAGE)" FAIL; echo 'Run make docker-build-sidecar'; exit 1; \
+		printf '%-10s required=%-18s found=%-24s %s\n' sidecar-img "$(SIDECAR_IMAGE)" missing FAIL; echo 'Run make docker-build-sidecar'; exit 1; \
 	fi
 
 setup-e2e: check-deps deps-go-mod kind-service-account kind-load-images kind-secrets

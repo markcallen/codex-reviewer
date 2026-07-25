@@ -31,7 +31,7 @@ print_check() {
   found="$2"
   required="$3"
   status="$4"
-  printf '%-10s found=%-24s required=%-18s %s\n' "$name" "$found" "$required" "$status"
+  printf '%-10s required=%-18s found=%-24s %s\n' "$name" "$required" "$found" "$status"
 }
 
 missing() {
