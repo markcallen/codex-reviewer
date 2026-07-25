@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
@@ -271,20 +272,20 @@ func runServiceSubmit(args []string) {
 		fmt.Fprintf(os.Stderr, "build review request failed: %v\n", err)
 		os.Exit(1)
 	}
-	data, err := req.JSON()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "encode review request failed: %v\n", err)
-		os.Exit(1)
-	}
-	if output != "" {
-		if err := os.WriteFile(output, data, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+	if dryRun {
+		data, err := req.JSON()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "encode review request failed: %v\n", err)
 			os.Exit(1)
 		}
-	} else {
-		fmt.Print(string(data))
-	}
-	if dryRun {
+		if output != "" {
+			if err := os.WriteFile(output, data, 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Print(string(data))
+		}
 		return
 	}
 	if apiURL == "" {
@@ -297,7 +298,20 @@ func runServiceSubmit(args []string) {
 		os.Exit(1)
 	}
 	if wait {
-		fmt.Fprintln(os.Stderr, "--wait polling is not implemented yet; review has been submitted")
+		report, err := service.Client{BaseURL: apiURL}.WaitReport(context.Background(), resp.ReportURL, 5*time.Second)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wait for review report failed: %v\n", err)
+			os.Exit(1)
+		}
+		if output != "" {
+			if err := os.WriteFile(output, report, 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Print(string(report))
+		}
+		return
 	}
 	respData, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {

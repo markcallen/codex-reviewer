@@ -17,19 +17,27 @@ import (
 type APIOptions struct {
 	JobOptions JobOptions
 	Applier    JobApplier
+	Reports    ReportReader
 }
 
 type JobApplier interface {
 	Apply(ctx context.Context, manifest []byte) error
 }
 
+type ReportReader interface {
+	ReadReport(ctx context.Context, namespace, jobName string) ([]byte, error)
+}
+
 type KubectlApplier struct{}
+
+type KubectlReportReader struct{}
 
 type ReviewResponse struct {
 	ID        string `json:"id"`
 	Status    string `json:"status"`
 	Verdict   string `json:"verdict,omitempty"`
 	Profile   string `json:"profile"`
+	JobName   string `json:"job_name,omitempty"`
 	ReportURL string `json:"report_url,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -43,6 +51,9 @@ type APIServer struct {
 func NewAPIServer(opts APIOptions) (*APIServer, error) {
 	if opts.Applier == nil {
 		opts.Applier = KubectlApplier{}
+	}
+	if opts.Reports == nil {
+		opts.Reports = KubectlReportReader{}
 	}
 	if opts.JobOptions.ReviewerImage == "" {
 		return nil, fmt.Errorf("reviewer image is required")
@@ -94,6 +105,7 @@ func (s *APIServer) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		ID:        id,
 		Status:    "submitted",
 		Profile:   req.ProfileName,
+		JobName:   JobName(id),
 		ReportURL: "/reviews/" + id + "/report",
 	}
 	s.mu.Lock()
@@ -127,7 +139,13 @@ func (s *APIServer) handleGetReport(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.Error(w, "report retrieval is not wired to artifact storage yet", http.StatusAccepted)
+	report, err := s.opts.Reports.ReadReport(r.Context(), s.opts.JobOptions.Namespace, JobName(id))
+	if err != nil {
+		http.Error(w, "review report is not available yet: "+err.Error(), http.StatusAccepted)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	_, _ = w.Write(report)
 }
 
 func (s *APIServer) review(id string) (ReviewResponse, bool) {
@@ -150,6 +168,25 @@ func (KubectlApplier) Apply(ctx context.Context, manifest []byte) error {
 		return err
 	}
 	return nil
+}
+
+func (KubectlReportReader) ReadReport(ctx context.Context, namespace, jobName string) ([]byte, error) {
+	args := []string{"logs", "job/" + jobName, "-c", "reviewer"}
+	if namespace != "" {
+		args = append([]string{"-n", namespace}, args...)
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail != "" {
+			return nil, fmt.Errorf("%w: %s", err, detail)
+		}
+		return nil, err
+	}
+	return out, nil
 }
 
 func newReviewID() string {

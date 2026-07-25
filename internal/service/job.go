@@ -89,7 +89,7 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 		"apiVersion": "batch/v1",
 		"kind":       "Job",
 		"metadata": map[string]any{
-			"name": "codex-review-" + dnsLabel(opts.ReviewID),
+			"name": JobName(opts.ReviewID),
 		},
 		"spec": map[string]any{
 			"activeDeadlineSeconds":   opts.ActiveDeadlineSeconds,
@@ -159,6 +159,10 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 }
 
 var nonDNSLabel = regexp.MustCompile(`[^a-z0-9-]+`)
+
+func JobName(reviewID string) string {
+	return "codex-review-" + dnsLabel(reviewID)
+}
 
 func dnsLabel(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))

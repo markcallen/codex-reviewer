@@ -5,14 +5,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client
+}
+
+func (c Client) Report(ctx context.Context, reportURL string) ([]byte, error) {
+	if c.HTTPClient == nil {
+		c.HTTPClient = http.DefaultClient
+	}
+	u, err := url.JoinPath(strings.TrimRight(c.BaseURL, "/"), strings.TrimLeft(reportURL, "/"))
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("review report returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+	}
+	return data, nil
+}
+
+func (c Client) WaitReport(ctx context.Context, reportURL string, interval time.Duration) ([]byte, error) {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		report, err := c.Report(ctx, reportURL)
+		if err == nil {
+			return report, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (c Client) Submit(ctx context.Context, req ReviewRequest) (ReviewResponse, error) {
