@@ -41,6 +41,7 @@ type artifact struct {
 type Options struct {
 	TargetDir  string
 	AGENTSFile string
+	Version    string
 	DryRun     bool
 	Quiet      bool
 }
@@ -63,6 +64,9 @@ func Install(opts Options) (Result, error) {
 	if opts.AGENTSFile == "" {
 		opts.AGENTSFile = "AGENTS.md"
 	}
+	if opts.Version == "" {
+		opts.Version = "dev"
+	}
 	targetDir, err := filepath.Abs(opts.TargetDir)
 	if err != nil {
 		return Result{}, err
@@ -76,6 +80,9 @@ func Install(opts Options) (Result, error) {
 	}
 
 	i := installRun{opts: opts, targetDir: targetDir}
+	if err := i.installReviewerConfig(); err != nil {
+		return i.result, err
+	}
 	if err := i.installConfig(); err != nil {
 		return i.result, err
 	}
@@ -99,6 +106,23 @@ type installRun struct {
 	result    Result
 }
 
+func (i *installRun) installReviewerConfig() error {
+	dest := ".codex-reviewer.toml"
+	current, exists, err := i.readTarget(dest)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return i.writeTarget(dest, []byte(defaultReviewerConfig(i.opts.Version)), "create", "installed codex-reviewer config")
+	}
+	next := mergeReviewerConfigVersion(current, i.opts.Version)
+	if bytes.Equal(current, next) {
+		i.add("skip", dest, "codex-reviewer config already current")
+		return nil
+	}
+	return i.writeTarget(dest, next, "merge", "updated codex-reviewer version")
+}
+
 func (i *installRun) installConfig() error {
 	dest := ".codex/config.toml"
 	bundled, err := readArtifact("artifacts/codex/config.toml")
@@ -118,6 +142,32 @@ func (i *installRun) installConfig() error {
 		return nil
 	}
 	return i.writeTarget(dest, next, "merge", "added review_model and missing [agents] limits")
+}
+
+func defaultReviewerConfig(version string) string {
+	return fmt.Sprintf(`version = %q
+
+[review.pre_push]
+base = ""
+block_on = "block"
+report = ".git/codex-review/pre-push-review.md"
+require_clean_tree = true
+`, version)
+}
+
+func mergeReviewerConfigVersion(current []byte, version string) []byte {
+	lines := splitLines(string(normalizeNewlines(current)))
+	for idx, line := range lines {
+		if sectionHeaderRE.MatchString(line) {
+			break
+		}
+		if keyLineMatches(line, "version") {
+			lines[idx] = fmt.Sprintf("version = %q", version)
+			return []byte(strings.Join(lines, "\n") + "\n")
+		}
+	}
+	lines = appendTopLevelKey(lines, fmt.Sprintf("version = %q", version))
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 func (i *installRun) installAGENTS() error {

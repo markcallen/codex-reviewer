@@ -44,7 +44,7 @@ Then commit the files in the target repository:
 
 ```bash
 cd /path/to/your/repo
-git add .codex AGENTS.md docs/code_review.md prompts/
+git add .codex .codex-reviewer.toml AGENTS.md docs/code_review.md prompts/
 git commit -m "Add Codex code reviewer subagent"
 ```
 
@@ -77,6 +77,7 @@ The Go CLI embeds all artifacts required for project installation, so the built 
 It is intentionally non-destructive:
 
 - Missing files are created.
+- `.codex-reviewer.toml` is created on first install with the installed CLI version and pre-push review defaults; later installs refresh only the recorded version.
 - Existing `.codex/config.toml` files are merged with only the missing review-related settings.
 - Existing `AGENTS.md` and `docs/code_review.md` files are extended with marked managed sections.
 - Existing agent and prompt files that differ from the bundled artifacts are kept unchanged and reported as warnings.
@@ -87,6 +88,41 @@ Build versions are injected with Go linker flags. By default, `make build` uses 
 ```bash
 make build VERSION=v1.0.0
 bin/codex-reviewer version
+```
+
+## Pre-push reviews
+
+Use your existing hook runner, such as pre-commit or Husky, to call:
+
+```bash
+codex-reviewer review pre-push
+```
+
+The command reads `.codex-reviewer.toml`, verifies the installed version matches
+the running `codex-reviewer` binary, requires a clean working tree by default,
+runs `codex exec review`, and writes the report under `.git/codex-review/`.
+
+For pre-commit:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: codex-reviewer-pre-push
+        name: Codex AI code review
+        entry: codex-reviewer review pre-push
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+```
+
+For Husky:
+
+```sh
+#!/usr/bin/env sh
+. "$(dirname "$0")/_/husky.sh"
+
+codex-reviewer review pre-push
 ```
 
 ## Model choice

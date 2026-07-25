@@ -3,6 +3,7 @@
 This repository contains a project-scoped Codex reviewer setup:
 
 - `.codex/config.toml` — project Codex defaults, subagent limits, and `/review` model override.
+- `.codex-reviewer.toml` — the installed `codex-reviewer` version and pre-push review defaults.
 - `.codex/agents/code-reviewer.toml` — the custom read-only `code_reviewer` subagent.
 - `AGENTS.md` — repository-level review guidance Codex reads before work.
 - `docs/code_review.md` — team review checklist referenced by `AGENTS.md`.
@@ -78,7 +79,7 @@ bin/codex-reviewer install /path/to/your/repo
 Then from your target repo:
 
 ```bash
-git add .codex AGENTS.md docs/code_review.md prompts/
+git add .codex .codex-reviewer.toml AGENTS.md docs/code_review.md prompts/
 git commit -m "Add Codex code reviewer subagent"
 ```
 
@@ -91,6 +92,13 @@ Verify the setup:
 ```bash
 bin/codex-reviewer doctor /path/to/your/repo
 ```
+
+The installed `.codex-reviewer.toml` records the CLI version used for the
+install. `codex-reviewer doctor` and `codex-reviewer review pre-push` fail when
+that version does not match the running binary, so hook runners do not silently
+use a different reviewer than the one committed with the repository. Rerunning
+`codex-reviewer install` with a newer binary refreshes the recorded version
+without replacing the pre-push settings.
 
 ## 5. Legacy shell installer
 
@@ -127,6 +135,17 @@ Non-interactive branch review:
 ```bash
 codex exec "Review this branch against main. Spawn the code_reviewer subagent, wait for it, and report prioritized findings with file references. Do not edit files."
 ```
+
+Pre-push review command for pre-commit, Husky, or another hook runner:
+
+```bash
+codex-reviewer review pre-push
+```
+
+The command does not install or manage hooks. It reads `.codex-reviewer.toml`,
+checks that the installed config version matches the running binary, requires a
+clean working tree by default, runs `codex exec review`, and writes the report to
+`.git/codex-review/pre-push-review.md` unless configured otherwise.
 
 Built-in local reviewer:
 

@@ -16,6 +16,7 @@ func TestInstallCreatesFreshProjectFiles(t *testing.T) {
 	}
 
 	requireFileContains(t, dir, ".codex/config.toml", `model = "gpt-5.5"`)
+	requireFileContains(t, dir, ".codex-reviewer.toml", `version = "dev"`)
 	requireFileContains(t, dir, ".codex/agents/code-reviewer.toml", `name = "code_reviewer"`)
 	requireFileContains(t, dir, "AGENTS.md", "Project review expectations")
 	requireFileContains(t, dir, "docs/code_review.md", "Code review checklist for Codex")
@@ -24,6 +25,17 @@ func TestInstallCreatesFreshProjectFiles(t *testing.T) {
 	if len(result.Actions) == 0 {
 		t.Fatal("Install() returned no actions")
 	}
+}
+
+func TestInstallCreatesReviewerConfigWithRuntimeVersion(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := Install(Options{TargetDir: dir, Version: "v1.2.3"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	requireFileContains(t, dir, ".codex-reviewer.toml", `version = "v1.2.3"`)
+	requireFileContains(t, dir, ".codex-reviewer.toml", `[review.pre_push]`)
 }
 
 func TestInstallMergesExistingConfigAndAGENTS(t *testing.T) {
@@ -77,6 +89,22 @@ func TestInstallIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestInstallUpdatesExistingReviewerConfigVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, ".codex-reviewer.toml", `version = "v1.0.0"
+
+[review.pre_push]
+base = "origin/main"
+`)
+
+	if _, err := Install(Options{TargetDir: dir, Version: "v2.0.0"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	requireFileContains(t, dir, ".codex-reviewer.toml", `version = "v2.0.0"`)
+	requireFileContains(t, dir, ".codex-reviewer.toml", `base = "origin/main"`)
+}
+
 func TestInstallDryRunDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	result, err := Install(Options{TargetDir: dir, DryRun: true})
@@ -121,8 +149,29 @@ func TestDoctorReportsIncompleteProject(t *testing.T) {
 	if !hasCheckStatus(report.Checks, ".codex/config.toml", "incomplete") {
 		t.Fatalf("Doctor() did not report incomplete config: %#v", report.Checks)
 	}
+	if !hasCheckStatus(report.Checks, ".codex-reviewer.toml", "missing") {
+		t.Fatalf("Doctor() did not report missing codex-reviewer config: %#v", report.Checks)
+	}
 	if !hasCheckStatus(report.Checks, "AGENTS.md", "missing") {
 		t.Fatalf("Doctor() did not report missing AGENTS.md: %#v", report.Checks)
+	}
+}
+
+func TestDoctorReportsReviewerVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Install(Options{TargetDir: dir, Version: "v1.0.0"}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	report, err := Doctor(DoctorOptions{TargetDir: dir, Version: "v2.0.0"})
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	if report.OK {
+		t.Fatalf("Doctor() OK = true for version mismatch, checks = %#v", report.Checks)
+	}
+	if !hasCheckStatus(report.Checks, ".codex-reviewer.toml", "mismatch") {
+		t.Fatalf("Doctor() did not report reviewer version mismatch: %#v", report.Checks)
 	}
 }
 

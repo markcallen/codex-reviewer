@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
+	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
 )
 
 var version = "dev"
@@ -21,6 +23,8 @@ func main() {
 		runInstall(os.Args[2:])
 	case "doctor":
 		runDoctor(os.Args[2:])
+	case "review":
+		runReview(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -29,6 +33,51 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", os.Args[1])
 		usage()
 		os.Exit(2)
+	}
+}
+
+func runReview(args []string) {
+	if len(args) == 0 {
+		reviewUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "pre-push":
+		runReviewPrePush(args[1:])
+	case "-h", "--help", "help":
+		reviewUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown review command: %s\n\n", args[0])
+		reviewUsage()
+		os.Exit(2)
+	}
+}
+
+func runReviewPrePush(args []string) {
+	var opts reviewer.PrePushOptions
+	fs := flag.NewFlagSet("review pre-push", flag.ExitOnError)
+	fs.StringVar(&opts.Base, "base", "", "base branch/ref to review against; defaults to config, upstream, origin/main, origin/master, then main")
+	fs.StringVar(&opts.Report, "report", "", "review report path; defaults to config")
+	fs.StringVar(&opts.BlockOn, "block-on", "", "when to block push: block or never; defaults to config")
+	fs.BoolVar(&opts.AllowDirty, "allow-dirty", false, "allow review to run with a dirty working tree")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex review command without running it")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review pre-push [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Dir = "."
+	opts.Version = version
+	opts.Stdout = os.Stdout
+	opts.Stderr = os.Stderr
+	if err := reviewer.RunPrePush(context.Background(), opts); err != nil {
+		fmt.Fprintf(os.Stderr, "pre-push review failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -50,6 +99,7 @@ func runInstall(args []string) {
 	}
 
 	opts.TargetDir = fs.Arg(0)
+	opts.Version = version
 	result, err := installer.Install(opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "install failed: %v\n", err)
@@ -93,6 +143,7 @@ func runDoctor(args []string) {
 	report, err := installer.Doctor(installer.DoctorOptions{
 		TargetDir:  fs.Arg(0),
 		AGENTSFile: agentsFile,
+		Version:    version,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "doctor failed: %v\n", err)
@@ -150,7 +201,17 @@ func usage() {
 Usage:
   codex-reviewer install [flags] /path/to/project
   codex-reviewer doctor [flags] /path/to/project
+  codex-reviewer review pre-push [flags]
   codex-reviewer version
 
 `, version)
+}
+
+func reviewUsage() {
+	fmt.Fprintf(os.Stderr, `codex-reviewer review
+
+Usage:
+  codex-reviewer review pre-push [flags]
+
+`)
 }

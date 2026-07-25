@@ -14,6 +14,7 @@ import (
 type DoctorOptions struct {
 	TargetDir  string
 	AGENTSFile string
+	Version    string
 }
 
 type DoctorReport struct {
@@ -34,6 +35,9 @@ func Doctor(opts DoctorOptions) (DoctorReport, error) {
 	if opts.AGENTSFile == "" {
 		opts.AGENTSFile = "AGENTS.md"
 	}
+	if opts.Version == "" {
+		opts.Version = "dev"
+	}
 	targetDir, err := filepath.Abs(opts.TargetDir)
 	if err != nil {
 		return DoctorReport{}, err
@@ -47,6 +51,7 @@ func Doctor(opts DoctorOptions) (DoctorReport, error) {
 	}
 
 	d := doctorRun{targetDir: targetDir, opts: opts}
+	d.checkReviewerConfig()
 	d.checkConfig()
 	d.checkAGENTS()
 	d.checkArtifact(artifact{Source: "artifacts/codex/agents/code-reviewer.toml", Dest: ".codex/agents/code-reviewer.toml"})
@@ -93,6 +98,53 @@ func (d *doctorRun) checkConfig() {
 		return
 	}
 	d.add("ok", dest, "review_model and agent limits are configured")
+}
+
+func (d *doctorRun) checkReviewerConfig() {
+	dest := ".codex-reviewer.toml"
+	current, exists, err := readPath(filepath.Join(d.targetDir, filepath.FromSlash(dest)))
+	if err != nil {
+		d.add("error", dest, err.Error())
+		return
+	}
+	if !exists {
+		d.add("missing", dest, "codex-reviewer config is not installed")
+		return
+	}
+	version, ok := readTopLevelString(current, "version")
+	if !ok {
+		d.add("incomplete", dest, "missing top-level version")
+		return
+	}
+	if version != d.opts.Version {
+		d.add("mismatch", dest, fmt.Sprintf("installed version %q does not match running version %q", version, d.opts.Version))
+		return
+	}
+	d.add("ok", dest, "codex-reviewer version matches")
+}
+
+func readTopLevelString(current []byte, key string) (string, bool) {
+	lines := splitLines(string(normalizeNewlines(current)))
+	section := ""
+	for _, line := range lines {
+		if match := sectionHeaderRE.FindStringSubmatch(line); match != nil {
+			section = strings.TrimSpace(match[1])
+			continue
+		}
+		if section != "" || !keyLineMatches(line, key) {
+			continue
+		}
+		_, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return "", false
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			return strings.ReplaceAll(value[1:len(value)-1], `\"`, `"`), true
+		}
+		return value, true
+	}
+	return "", false
 }
 
 func (d *doctorRun) checkAGENTS() {
