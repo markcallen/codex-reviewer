@@ -118,7 +118,8 @@ To use the reviewer in every repo without committing project files:
 ./scripts/install-global.sh
 ```
 
-This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml` and prints the config block to add to `~/.codex/config.toml`.
+This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml`, checks
+`~/.codex/config.toml`, and asks before adding any missing reviewer settings.
 
 ## 7. Docker and GHCR local option
 
@@ -143,7 +144,17 @@ Run a review from the repository being reviewed:
 ```bash
 export OPENAI_API_KEY=...
 export GITHUB_TOKEN=...
-make docker-run-review DOCKER_RUN_IMAGE="$GHCR_IMAGE:$GHCR_TAG"
+
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e OPENAI_API_KEY \
+  -e GITHUB_TOKEN \
+  -e REVIEW_BASE=origin/main \
+  -e REVIEW_REPORT=codex-review/docker-review.md \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  "$GHCR_IMAGE:$GHCR_TAG" \
+  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker command and runtime options.

@@ -16,48 +16,56 @@ It avoids style-only comments unless style hides a real bug.
 
 ## Quick start
 
-Build the self-contained CLI:
+Install the reviewer for your user account:
 
 ```bash
-make build
+./scripts/install-global.sh
 ```
 
-Preview the install into a target repository:
+When prompted, let the installer update:
+
+```text
+~/.codex/config.toml
+```
+
+Build the local reviewer container:
 
 ```bash
-bin/codex-reviewer install --dry-run /path/to/your/repo
+make docker-build-runner
 ```
 
-Install this setup into the target repository:
+From the repository you want to review, export credentials:
 
 ```bash
-bin/codex-reviewer install /path/to/your/repo
+export OPENAI_API_KEY=...
+export GITHUB_TOKEN=...
 ```
 
-Check whether a repository is set up correctly:
+Run the review with the local image:
 
 ```bash
-bin/codex-reviewer doctor /path/to/your/repo
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e OPENAI_API_KEY \
+  -e GITHUB_TOKEN \
+  -e REVIEW_BASE=origin/main \
+  -e REVIEW_REPORT=codex-review/docker-review.md \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  codex-reviewer:phase1 \
+  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
 ```
 
-Then commit the files in the target repository:
+The report is written to:
 
-```bash
-cd /path/to/your/repo
-git add .codex .codex-reviewer.toml AGENTS.md docs/code_review.md prompts/
-git commit -m "Add Codex code reviewer subagent"
+```text
+codex-review/docker-review.md
 ```
 
-Open Codex in that repo:
+For an interactive local Codex review in the same repo, open Codex:
 
 ```bash
 codex
-```
-
-Then paste:
-
-```text
-Review this branch against main. Spawn the code_reviewer subagent, have it inspect the diff and relevant surrounding code in read-only mode, wait for it to finish, then summarize prioritized findings with file references and suggested fixes. Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.
 ```
 
 ## Global install
@@ -68,7 +76,8 @@ To make the reviewer available across repositories:
 ./scripts/install-global.sh
 ```
 
-Then add the printed config block to `~/.codex/config.toml`.
+The script installs the agent, checks `~/.codex/config.toml`, and asks before
+adding any missing reviewer settings.
 
 ## Docker and GHCR
 
@@ -92,7 +101,17 @@ Run a review from any checked-out repository:
 ```bash
 export OPENAI_API_KEY=...
 export GITHUB_TOKEN=...
-make docker-run-review DOCKER_RUN_IMAGE="$GHCR_IMAGE:$GHCR_TAG"
+
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e OPENAI_API_KEY \
+  -e GITHUB_TOKEN \
+  -e REVIEW_BASE=origin/main \
+  -e REVIEW_REPORT=codex-review/docker-review.md \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  "$GHCR_IMAGE:$GHCR_TAG" \
+  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker commands and options.

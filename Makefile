@@ -19,9 +19,6 @@ SIDECAR_IMAGE ?= openai-egress:phase1
 GHCR_IMAGE ?= ghcr.io/everydaydevops/codex-code-reviewer
 GHCR_TAG ?= $(VERSION)
 GHCR_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_TAG)
-DOCKER_RUN_IMAGE ?= $(RUNNER_IMAGE)
-REVIEW_BASE ?= origin/main
-REVIEW_REPORT ?= .git/codex-review/docker-review.md
 OPENAI_SECRET ?= openai-api
 OPENAI_SECRET_KEY ?= api-key
 GITHUB_SECRET ?= github-token
@@ -31,7 +28,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-run-review kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -49,7 +46,6 @@ help:
 		'  make docker-build-runner Build the local reviewer container image' \
 		'  make docker-tag-runner   Tag the reviewer image for GHCR' \
 		'  make docker-push-runner  Push the reviewer image to GHCR' \
-		'  make docker-run-review   Review this repo using the reviewer container' \
 		'  make e2e                Run the kind e2e review test' \
 		'  make e2e-small          Run the kind e2e against one small repo' \
 		'  make clean              Remove local build output' \
@@ -68,9 +64,6 @@ help:
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
 		'  GHCR_RUNNER_IMAGE=$(GHCR_RUNNER_IMAGE)' \
-		'  DOCKER_RUN_IMAGE=$(DOCKER_RUN_IMAGE)' \
-		'  REVIEW_BASE=$(REVIEW_BASE)' \
-		'  REVIEW_REPORT=$(REVIEW_REPORT)' \
 		'  OPENAI_SECRET=$(OPENAI_SECRET)' \
 		'  GITHUB_SECRET=$(GITHUB_SECRET)'
 
@@ -176,20 +169,6 @@ docker-tag-runner: docker-build-runner
 
 docker-push-runner: docker-tag-runner
 	docker push "$(GHCR_RUNNER_IMAGE)"
-
-docker-run-review:
-	@[ -n "$${OPENAI_API_KEY:-}" ] || { echo 'OPENAI_API_KEY is required'; exit 1; }
-	@[ -n "$${GITHUB_TOKEN:-}" ] || { echo 'GITHUB_TOKEN is required'; exit 1; }
-	docker run --rm \
-		--user "$$(id -u):$$(id -g)" \
-		-e OPENAI_API_KEY \
-		-e GITHUB_TOKEN \
-		-e REVIEW_BASE="$(REVIEW_BASE)" \
-		-e REVIEW_REPORT="$(REVIEW_REPORT)" \
-		-v "$$(pwd):/workspace" \
-		-w /workspace \
-		"$(DOCKER_RUN_IMAGE)" \
-		sh -lc 'mkdir -p "$$(dirname "$$REVIEW_REPORT")" && codex exec review --base "$$REVIEW_BASE" --output-last-message "$$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
 
 kind-load-runner: kind-create docker-build-runner
 	kind load docker-image "$(RUNNER_IMAGE)" --name "$(KIND_CLUSTER)"

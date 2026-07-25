@@ -62,44 +62,26 @@ From the repository you want to review:
 export OPENAI_API_KEY=...
 export GITHUB_TOKEN=...
 
-make docker-run-review
-```
-
-By default this reviews against `origin/main` and writes:
-
-```text
-.git/codex-review/docker-review.md
-```
-
-Override the base or report path:
-
-```bash
-make docker-run-review \
-  REVIEW_BASE=origin/main \
-  REVIEW_REPORT=.git/codex-review/docker-review.md
-```
-
-Run the review using a GHCR image instead of the local image:
-
-```bash
-make docker-run-review \
-  DOCKER_RUN_IMAGE=ghcr.io/<owner>/codex-code-reviewer:v0.1.0
-```
-
-The equivalent raw Docker command is:
-
-```bash
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
   -e REVIEW_BASE=origin/main \
-  -e REVIEW_REPORT=.git/codex-review/docker-review.md \
+  -e REVIEW_REPORT=codex-review/docker-review.md \
   -v "$PWD:/workspace" \
   -w /workspace \
   ghcr.io/<owner>/codex-code-reviewer:v0.1.0 \
   sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
 ```
+
+This reviews against `origin/main` and writes:
+
+```text
+codex-review/docker-review.md
+```
+
+Change `REVIEW_BASE`, `REVIEW_REPORT`, or the image name in the command when you
+need a different base ref, output path, or image tag.
 
 ## Run App Commands in the Container
 
