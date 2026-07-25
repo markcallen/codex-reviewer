@@ -10,6 +10,7 @@ Thumbs.db
 *.swp
 *.swo
 bin/
+coverage/
 
 # Local env files
 .env

@@ -7,6 +7,9 @@ GO_MIN_VERSION ?= 1.25
 GO_INSTALL_VERSION ?= 1.25.0
 KIND_VERSION ?= v0.30.0
 KUBECTL_VERSION ?= stable
+COVERAGE_DIR ?= coverage
+COVERAGE_PROFILE ?= $(COVERAGE_DIR)/coverage.out
+COVERAGE_HTML ?= $(COVERAGE_DIR)/coverage.html
 
 KIND_CLUSTER ?= codex-reviewer-e2e
 NAMESPACE ?= codex-reviewer-e2e
@@ -19,14 +22,16 @@ GITHUB_SECRET ?= github-token
 GITHUB_SECRET_KEY ?= token
 E2E_TEST ?= TestKindReviewsSmallAndLargePrivateRepos
 
-.PHONY: help setup build test test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e clean clean-kind
+.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e clean clean-kind
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
 		'  make setup              Install deps, verify tools, build, and test' \
 		'  make build              Build bin/codex-reviewer' \
-		'  make test               Run unit tests' \
+		'  make test               Run unit tests with coverage' \
+		'  make coverage-func      Print function-level coverage' \
+		'  make coverage-html      Generate HTML coverage report' \
 		'  make test-e2e           Compile e2e tests; skips unless RUN_KIND_E2E=1' \
 		'  make lint               Run gofmt check and go vet' \
 		'  make deps               Install dev tools and download Go modules' \
@@ -41,6 +46,7 @@ help:
 		'  GO_INSTALL_VERSION=$(GO_INSTALL_VERSION)' \
 		'  KIND_VERSION=$(KIND_VERSION)' \
 		'  KUBECTL_VERSION=$(KUBECTL_VERSION)' \
+		'  COVERAGE_PROFILE=$(COVERAGE_PROFILE)' \
 		'  KIND_CLUSTER=$(KIND_CLUSTER)' \
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
@@ -54,7 +60,16 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 test:
-	go test ./...
+	@mkdir -p "$(COVERAGE_DIR)"
+	go test -covermode=atomic -coverprofile="$(COVERAGE_PROFILE)" ./...
+	@go tool cover -func="$(COVERAGE_PROFILE)" | tail -1
+
+coverage-func: test
+	go tool cover -func="$(COVERAGE_PROFILE)"
+
+coverage-html: test
+	go tool cover -html="$(COVERAGE_PROFILE)" -o "$(COVERAGE_HTML)"
+	@echo "Wrote $(COVERAGE_HTML)"
 
 test-e2e:
 	go test -tags=e2e ./e2e
@@ -147,6 +162,7 @@ e2e: check-e2e-deps
 
 clean:
 	rm -f $(BINARY)
+	rm -rf "$(COVERAGE_DIR)"
 
 clean-kind:
 	kind delete cluster --name "$(KIND_CLUSTER)"
