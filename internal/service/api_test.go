@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeApplier struct {
@@ -80,6 +82,79 @@ func TestAPIServerCreatesReviewJob(t *testing.T) {
 	}
 }
 
+func TestAPIServerGetsSubmittedReview(t *testing.T) {
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+		Applier: &fakeApplier{},
+		Reports: fakeReportReader{report: []byte("No blocking findings\n")},
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+
+	body, err := testReviewRequest(t).JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	createRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(createRec, httptest.NewRequest(http.MethodPost, "/reviews", strings.NewReader(string(body))))
+	if createRec.Code != http.StatusAccepted {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created ReviewResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("Unmarshal response error = %v", err)
+	}
+
+	getRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/reviews/"+created.ID, nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status = %d, body = %s", getRec.Code, getRec.Body.String())
+	}
+	var got ReviewResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("Unmarshal get response error = %v", err)
+	}
+	if got.ID != created.ID || got.JobName != created.JobName {
+		t.Fatalf("GET response = %#v, created = %#v", got, created)
+	}
+}
+
+func TestAPIServerReportsApplyFailure(t *testing.T) {
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+		Applier: &fakeApplier{err: errors.New("apply failed")},
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+	body, err := testReviewRequest(t).JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/reviews", strings.NewReader(string(body))))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp ReviewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Unmarshal response error = %v", err)
+	}
+	if resp.Status != "failed" || !strings.Contains(resp.Error, "apply failed") {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
 func TestClientSubmitsReview(t *testing.T) {
 	req := testReviewRequest(t)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +189,30 @@ func TestClientReadsReport(t *testing.T) {
 		t.Fatalf("Report() error = %v", err)
 	}
 	if string(report) != "Block\n" {
+		t.Fatalf("report = %q", report)
+	}
+}
+
+func TestClientWaitReportRetriesUntilAvailable(t *testing.T) {
+	attempts := 0
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			http.Error(w, "not ready", http.StatusAccepted)
+			return
+		}
+		_, _ = w.Write([]byte("No blocking findings\n"))
+	}))
+	defer httpServer.Close()
+
+	report, err := Client{BaseURL: httpServer.URL}.WaitReport(context.Background(), "/reviews/review-1/report", time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitReport() error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if string(report) != "No blocking findings\n" {
 		t.Fatalf("report = %q", report)
 	}
 }

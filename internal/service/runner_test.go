@@ -157,16 +157,49 @@ func TestRunReviewJobConfiguresGitHubTokenWhenPresent(t *testing.T) {
 }
 
 func TestParseVerdictFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "review.md")
-	if err := os.WriteFile(path, []byte("# No blocking findings\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "block", body: "# Block\n", want: "block"},
+		{name: "approve with fixes", body: "Approve with fixes\n", want: "approve_with_fixes"},
+		{name: "no blocking findings", body: "# No blocking findings\n", want: "no_blocking_findings"},
+		{name: "unknown", body: "Looks fine\n", want: "unknown"},
 	}
-	got, err := ParseVerdictFile(path)
-	if err != nil {
-		t.Fatalf("ParseVerdictFile() error = %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "review.md")
+			if err := os.WriteFile(path, []byte(tt.body), 0o644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			got, err := ParseVerdictFile(path)
+			if err != nil {
+				t.Fatalf("ParseVerdictFile() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("ParseVerdictFile() = %q, want %q", got, tt.want)
+			}
+		})
 	}
-	if got != "no_blocking_findings" {
-		t.Fatalf("ParseVerdictFile() = %q", got)
+}
+
+func TestDecodeReviewRequestRejectsUnknownFields(t *testing.T) {
+	_, err := DecodeReviewRequest([]byte(`{"repo_url":"git@example.com/repo.git","unknown":true}`))
+	if err == nil {
+		t.Fatal("DecodeReviewRequest() error = nil, want unknown field error")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("DecodeReviewRequest() error = %v", err)
+	}
+}
+
+func TestReviewPromptIncludesAdditionalInstructions(t *testing.T) {
+	req := testRunnerRequest(t)
+	req.Instructions = "Focus on migrations."
+	prompt := reviewPrompt(req)
+	if !strings.Contains(prompt, "code_reviewer") || !strings.Contains(prompt, "Focus on migrations.") {
+		t.Fatalf("reviewPrompt() = %q", prompt)
 	}
 }
 
