@@ -72,18 +72,21 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("RunReviewJob() error = %v", err)
 	}
 
-	if len(runner.commands) != 5 {
-		t.Fatalf("commands len = %d, want 5: %#v", len(runner.commands), runner.commands)
+	if len(runner.commands) != 6 {
+		t.Fatalf("commands len = %d, want 6: %#v", len(runner.commands), runner.commands)
 	}
 	last := runner.commands[len(runner.commands)-1]
 	if last.Name != "codex" {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer"} {
+	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
+	}
+	if strings.Contains(args, "code_reviewer") {
+		t.Fatalf("codex exec review --base must not include a prompt argument: %v", last.Args)
 	}
 
 	metadata := readMetadata(t, filepath.Join(out, "metadata.json"))
@@ -154,6 +157,45 @@ func TestRunReviewJobConfiguresGitHubTokenWhenPresent(t *testing.T) {
 	if !strings.Contains(strings.Join(first.Args, " "), "x-access-token") {
 		t.Fatalf("git credential command missing token username: %#v", first.Args)
 	}
+	codexIndex := commandIndex(runner.commands, "codex")
+	if codexIndex < 0 {
+		t.Fatalf("codex command missing: %#v", runner.commands)
+	}
+	setURLIndex := commandIndexWithArgs(runner.commands, "git", "remote", "set-url", "origin", req.RepoURL)
+	if setURLIndex < 0 || setURLIndex > codexIndex {
+		t.Fatalf("remote URL was not sanitized before codex: %#v", runner.commands)
+	}
+	unsetIndex := commandIndexWithArgs(runner.commands, "git", "config", "--global", "--unset-all")
+	if unsetIndex < 0 || unsetIndex > codexIndex {
+		t.Fatalf("credential rewrite was not removed before codex: %#v", runner.commands)
+	}
+}
+
+func TestRunReviewJobDoesNotFetchRawBaseSHA(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	out := t.TempDir()
+	req := testRunnerRequest(t)
+	req.BaseRef = "0123456789abcdef0123456789abcdef01234567"
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	runner := &fakeCommandRunner{}
+
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   out,
+		Runner:      runner,
+	})
+	if err != nil {
+		t.Fatalf("RunReviewJob() error = %v", err)
+	}
+	for _, command := range runner.commands {
+		if command.Name == "git" && len(command.Args) == 3 && command.Args[0] == "fetch" && command.Args[2] == req.BaseRef {
+			t.Fatalf("raw SHA base should not be fetched as a remote ref: %#v", runner.commands)
+		}
+	}
 }
 
 func TestParseVerdictFile(t *testing.T) {
@@ -201,6 +243,60 @@ func TestReviewPromptIncludesAdditionalInstructions(t *testing.T) {
 	if !strings.Contains(prompt, "code_reviewer") || !strings.Contains(prompt, "Focus on migrations.") {
 		t.Fatalf("reviewPrompt() = %q", prompt)
 	}
+}
+
+func TestLocalProxyAddressOnlyUsesLoopbackProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:8888")
+	t.Setenv("HTTP_PROXY", "http://proxy.example.com:8080")
+	if got := localProxyAddress(); got != "127.0.0.1:8888" {
+		t.Fatalf("localProxyAddress() = %q", got)
+	}
+}
+
+func TestLocalProxyAddressIgnoresRemoteProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+	if got := localProxyAddress(); got != "" {
+		t.Fatalf("localProxyAddress() = %q, want empty", got)
+	}
+}
+
+func TestRemoteFetchRefTrimsOriginPrefix(t *testing.T) {
+	if got := remoteFetchRef("origin/main"); got != "main" {
+		t.Fatalf("remoteFetchRef(origin/main) = %q", got)
+	}
+	if got := remoteFetchRef("feature/test"); got != "feature/test" {
+		t.Fatalf("remoteFetchRef(feature/test) = %q", got)
+	}
+}
+
+func commandIndex(commands []recordedCommand, name string) int {
+	for i, command := range commands {
+		if command.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func commandIndexWithArgs(commands []recordedCommand, name string, args ...string) int {
+	for i, command := range commands {
+		if command.Name != name || len(command.Args) < len(args) {
+			continue
+		}
+		matched := true
+		for j, arg := range args {
+			if command.Args[j] != arg {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return i
+		}
+	}
+	return -1
 }
 
 func testRunnerRequest(t *testing.T) ReviewRequest {

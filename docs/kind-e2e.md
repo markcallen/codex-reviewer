@@ -2,9 +2,14 @@
 
 The kind e2e test is opt-in and gated behind the `e2e` build tag.
 
-It reviews one small private repository and one large private repository from
-`e2e/repos.json`. The fixture contains 10 private `markcallen` repositories:
-five small and five large, selected by GitHub `diskUsage`.
+By default, `make e2e` reviews one small private repository and one large
+private repository from `e2e/repos.json`. The fixture contains 10 private
+`markcallen` repositories: five small and five large, selected by GitHub
+`diskUsage`.
+
+For fast smoke tests, `make e2e-small` forces a single small repository. Its
+default is the public `octocat/Hello-World` repository so the harness can be
+validated without relying on private `markcallen` fixtures.
 
 ## Requirements
 
@@ -26,7 +31,30 @@ make setup-e2e
 make e2e
 ```
 
-The manual commands below show what those targets configure.
+For faster iteration, run one small repo:
+
+```bash
+make e2e-small
+```
+
+To force one or more specific repositories:
+
+```bash
+E2E_REPOS=markcallen/rpi-k3s-cluster make e2e
+E2E_REPOS=octocat/Hello-World make e2e-small
+```
+
+`E2E_REPOS` accepts comma-separated `owner/repo` values. Repositories listed in
+`e2e/repos.json` keep their fixture metadata; other `owner/repo` values are
+treated as GitHub HTTPS repositories.
+
+The e2e test currently exercises a branch-change review, not a full repository
+audit. It resolves the default branch, checks out the branch head SHA, and uses
+the head commit's first parent SHA as `--base` when available. That produces a
+real diff review for the latest branch change. Repositories with only one commit
+fall back to `origin/<default-branch>`, which can produce an empty review.
+
+The manual commands below show what the Make targets configure.
 
 Build and load the runner image:
 
@@ -76,7 +104,8 @@ go test -v -tags=e2e ./e2e -run TestKindReviewsSmallAndLargePrivateRepos -count=
 The test creates a kind cluster if one does not exist, creates the configured
 namespace if needed, creates the configured Kubernetes Secrets from
 `OPENAI_API_KEY` and `GITHUB_TOKEN`, resolves each selected repository's default
-branch SHA with `gh`, creates a one-shot Kubernetes Job manifest, applies it,
+branch and head SHA with `gh`, uses the head commit's parent SHA as the review
+base when available, creates a one-shot Kubernetes Job manifest, applies it,
 waits for the reviewer container to finish, reads the reviewer logs, and asserts
 that a review verdict or report write confirmation was produced.
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,6 +107,9 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o644); err != nil {
 		return fmt.Errorf("write request.json: %w", err)
 	}
+	if err := waitForLocalProxy(ctx, 30*time.Second); err != nil {
+		return err
+	}
 
 	reportPath := filepath.Join(opts.OutputDir, "review.md")
 	metadataPath := filepath.Join(opts.OutputDir, "metadata.json")
@@ -146,8 +151,9 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 }
 
 func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewRequest, reportPath string) error {
+	var rewrite string
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		rewrite := "url.https://x-access-token:" + token + "@github.com/.insteadOf"
+		rewrite = "url.https://x-access-token:" + token + "@github.com/.insteadOf"
 		if err := opts.Runner.Run(ctx, "", "git", "config", "--global", rewrite, "https://github.com/"); err != nil {
 			return fmt.Errorf("configure GitHub credentials: %w", err)
 		}
@@ -155,8 +161,10 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 	if err := opts.Runner.Run(ctx, "", "git", "clone", "--no-checkout", req.RepoURL, opts.Workspace); err != nil {
 		return fmt.Errorf("clone repository: %w", err)
 	}
-	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "fetch", "origin", req.BaseRef); err != nil {
-		return fmt.Errorf("fetch base ref: %w", err)
+	if !looksLikeSHA(req.BaseRef) {
+		if err := opts.Runner.Run(ctx, opts.Workspace, "git", "fetch", "origin", remoteFetchRef(req.BaseRef)); err != nil {
+			return fmt.Errorf("fetch base ref: %w", err)
+		}
 	}
 	if req.HeadRef != "" && req.HeadRef != "HEAD" && req.HeadRef != req.HeadSHA {
 		if err := opts.Runner.Run(ctx, opts.Workspace, "git", "fetch", "origin", req.HeadRef); err != nil {
@@ -166,17 +174,86 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "checkout", "--detach", req.HeadSHA); err != nil {
 		return fmt.Errorf("checkout head SHA: %w", err)
 	}
+	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "remote", "set-url", "origin", req.RepoURL); err != nil {
+		return fmt.Errorf("sanitize repository remote: %w", err)
+	}
+	if rewrite != "" {
+		if err := opts.Runner.Run(ctx, "", "git", "config", "--global", "--unset-all", rewrite); err != nil {
+			return fmt.Errorf("remove GitHub credential rewrite: %w", err)
+		}
+	}
 	args := []string{
 		"exec", "review",
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
-		reviewPrompt(req),
 	}
 	if err := opts.Runner.Run(ctx, opts.Workspace, "codex", args...); err != nil {
 		return fmt.Errorf("run codex review: %w", err)
 	}
 	return nil
+}
+
+func looksLikeSHA(value string) bool {
+	if len(value) < 7 || len(value) > 40 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func remoteFetchRef(ref string) string {
+	return strings.TrimPrefix(ref, "origin/")
+}
+
+func waitForLocalProxy(ctx context.Context, timeout time.Duration) error {
+	address := localProxyAddress()
+	if address == "" {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		dialer := net.Dialer{Timeout: time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("wait for local proxy %s: %w", address, lastErr)
+}
+
+func localProxyAddress() string {
+	for _, env := range []string{"HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"} {
+		raw := os.Getenv(env)
+		if raw == "" {
+			continue
+		}
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(parsed.Host)
+		if err != nil {
+			continue
+		}
+		if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+			return net.JoinHostPort(host, port)
+		}
+	}
+	return ""
 }
 
 func reviewPrompt(req ReviewRequest) string {

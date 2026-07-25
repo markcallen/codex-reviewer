@@ -21,8 +21,11 @@ OPENAI_SECRET_KEY ?= api-key
 GITHUB_SECRET ?= github-token
 GITHUB_SECRET_KEY ?= token
 E2E_TEST ?= TestKindReviewsSmallAndLargePrivateRepos
+E2E_GO_TEST_FLAGS ?= -v
+E2E_REPOS ?=
+E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e clean clean-kind
+.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -38,6 +41,7 @@ help:
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
 		'  make e2e                Run the kind e2e review test' \
+		'  make e2e-small          Run the kind e2e against one small repo' \
 		'  make clean              Remove local build output' \
 		'  make clean-kind         Delete the kind cluster' \
 		'' \
@@ -47,6 +51,8 @@ help:
 		'  KIND_VERSION=$(KIND_VERSION)' \
 		'  KUBECTL_VERSION=$(KUBECTL_VERSION)' \
 		'  COVERAGE_PROFILE=$(COVERAGE_PROFILE)' \
+		'  E2E_REPOS=$(E2E_REPOS)' \
+		'  E2E_SMALL_REPO=$(E2E_SMALL_REPO)' \
 		'  KIND_CLUSTER=$(KIND_CLUSTER)' \
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
@@ -168,7 +174,21 @@ e2e: check-e2e-deps
 	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
 	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \
 	CODEX_REVIEWER_SERVICE_ACCOUNT="$(SERVICE_ACCOUNT)" \
-	go test -tags=e2e ./e2e -run "$(E2E_TEST)" -count=1
+	CODEX_REVIEWER_E2E_REPOS="$(E2E_REPOS)" \
+	go test $(E2E_GO_TEST_FLAGS) -tags=e2e ./e2e -run "$(E2E_TEST)" -count=1
+
+e2e-small: check-e2e-deps
+	RUN_KIND_E2E=1 \
+	CODEX_REVIEWER_E2E_SMALL_ONLY=1 \
+	CODEX_REVIEWER_REVIEWER_IMAGE="$(RUNNER_IMAGE)" \
+	CODEX_REVIEWER_SIDECAR_IMAGE="$(SIDECAR_IMAGE)" \
+	CODEX_REVIEWER_OPENAI_SECRET="$(OPENAI_SECRET)" \
+	CODEX_REVIEWER_GITHUB_SECRET="$(GITHUB_SECRET)" \
+	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
+	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \
+	CODEX_REVIEWER_SERVICE_ACCOUNT="$(SERVICE_ACCOUNT)" \
+	CODEX_REVIEWER_E2E_REPOS="$(if $(E2E_REPOS),$(E2E_REPOS),$(E2E_SMALL_REPO))" \
+	go test $(E2E_GO_TEST_FLAGS) -tags=e2e ./e2e -run "$(E2E_TEST)" -count=1
 
 clean:
 	rm -f $(BINARY)
