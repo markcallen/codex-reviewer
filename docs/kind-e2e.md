@@ -18,6 +18,16 @@ five small and five large, selected by GitHub `diskUsage`.
 
 ## Environment
 
+The Makefile drives the standard setup path:
+
+```bash
+make check-deps
+make setup-e2e
+make e2e
+```
+
+The manual commands below show what those targets configure.
+
 Build and load the runner image:
 
 ```bash
