@@ -49,12 +49,45 @@ func runService(args []string) {
 		runServiceSubmit(args[1:])
 	case "job-manifest":
 		runServiceJobManifest(args[1:])
+	case "runner":
+		runServiceRunner(args[1:])
 	case "-h", "--help", "help":
 		serviceUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown service command: %s\n\n", args[0])
 		serviceUsage()
 		os.Exit(2)
+	}
+}
+
+func runServiceRunner(args []string) {
+	fs := flag.NewFlagSet("service runner", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service runner\n\n")
+		fmt.Fprintf(fs.Output(), "Reads REVIEW_REQUEST_JSON, REVIEW_ID, REVIEW_WORKSPACE, and REVIEW_OUTPUT_DIR from the environment.\n")
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	requestJSON := os.Getenv("REVIEW_REQUEST_JSON")
+	if requestJSON == "" {
+		fmt.Fprintln(os.Stderr, "REVIEW_REQUEST_JSON is required")
+		os.Exit(1)
+	}
+	opts := service.RunnerOptions{
+		ReviewID:    os.Getenv("REVIEW_ID"),
+		RequestJSON: requestJSON,
+		Workspace:   firstNonEmpty(os.Getenv("REVIEW_WORKSPACE"), "/workspace"),
+		OutputDir:   firstNonEmpty(os.Getenv("REVIEW_OUTPUT_DIR"), "/out"),
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+	}
+	if err := service.RunReviewJob(context.Background(), opts); err != nil {
+		fmt.Fprintf(os.Stderr, "review runner failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -334,6 +367,7 @@ Usage:
   codex-reviewer review pre-push [flags]
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
+  codex-reviewer service runner
   codex-reviewer version
 
 `, version)
@@ -354,6 +388,16 @@ func serviceUsage() {
 Usage:
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
+  codex-reviewer service runner
 
 `)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
