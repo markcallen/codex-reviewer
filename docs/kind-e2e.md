@@ -66,6 +66,13 @@ export CODEX_REVIEWER_SERVICE_ACCOUNT=codex-reviewer
 go test -tags=e2e ./e2e -run TestKindReviewsSmallAndLargePrivateRepos -count=1
 ```
 
+Use verbose mode to print the selected repository, URL, size, branch, SHA, Job
+name, and resulting review output:
+
+```bash
+go test -v -tags=e2e ./e2e -run TestKindReviewsSmallAndLargePrivateRepos -count=1
+```
+
 The test creates a kind cluster if one does not exist, creates the configured
 namespace if needed, creates the configured Kubernetes Secrets from
 `OPENAI_API_KEY` and `GITHUB_TOKEN`, resolves each selected repository's default

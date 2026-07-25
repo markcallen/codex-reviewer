@@ -55,6 +55,7 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 	for _, repo := range cases {
 		t.Run(repo.Name, func(t *testing.T) {
 			branch, headSHA := defaultBranch(t, ctx, repo.Name)
+			t.Logf("repo=%s url=%s disk_usage_kb=%d branch=%s sha=%s", repo.Name, repo.URL, repo.DiskUsageKB, branch, headSHA)
 			req := service.ReviewRequest{
 				RepoURL:      repo.URL,
 				BaseRef:      "origin/" + branch,
@@ -77,6 +78,7 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 				t.Fatalf("JobManifest() error = %v", err)
 			}
 			jobName := service.JobName("e2e-" + sanitizeName(repo.Name))
+			t.Logf("job=%s namespace=%s reviewer_image=%s sidecar_image=%s", jobName, namespace, reviewerImage, sidecarImage)
 			deleteJobIfExists(t, ctx, namespace, jobName)
 			applyManifest(t, ctx, manifest)
 			t.Cleanup(func() {
@@ -84,6 +86,7 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			})
 			waitForReviewerContainer(t, ctx, namespace, jobName, 40*time.Minute)
 			logs := output(t, ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
+			t.Logf("code review output for %s@%s:\n%s", repo.Name, headSHA, string(logs))
 			assertReviewRan(t, string(logs))
 		})
 	}
