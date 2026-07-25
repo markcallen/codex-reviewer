@@ -7,12 +7,12 @@ import (
 )
 
 type Profile struct {
-	Name            string
-	Agent           string
-	Model           string
-	ReasoningEffort string
-	Prompt          string
-	Timeout         string
+	Name            string `json:"name"`
+	Agent           string `json:"agent"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	Prompt          string `json:"prompt"`
+	Timeout         string `json:"timeout"`
 }
 
 var builtinProfiles = map[string]Profile{

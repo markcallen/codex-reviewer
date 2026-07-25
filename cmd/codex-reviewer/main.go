@@ -8,6 +8,7 @@ import (
 
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
+	"github.com/everydaydevops/codex-code-reviewer/internal/service"
 )
 
 var version = "dev"
@@ -25,6 +26,8 @@ func main() {
 		runDoctor(os.Args[2:])
 	case "review":
 		runReview(os.Args[2:])
+	case "service":
+		runService(os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	case "-h", "--help", "help":
@@ -34,6 +37,77 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+}
+
+func runService(args []string) {
+	if len(args) == 0 {
+		serviceUsage()
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "submit":
+		runServiceSubmit(args[1:])
+	case "-h", "--help", "help":
+		serviceUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown service command: %s\n\n", args[0])
+		serviceUsage()
+		os.Exit(2)
+	}
+}
+
+func runServiceSubmit(args []string) {
+	var opts service.SubmitOptions
+	var output string
+	var dryRun bool
+	var wait bool
+	fs := flag.NewFlagSet("service submit", flag.ExitOnError)
+	fs.StringVar(&opts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
+	fs.StringVar(&opts.BaseRef, "base", "", "base branch/ref; defaults to origin/main")
+	fs.StringVar(&opts.HeadRef, "head", "", "head branch/ref; defaults to HEAD")
+	fs.StringVar(&opts.HeadSHA, "head-sha", "", "exact head SHA; defaults to resolving --head")
+	fs.StringVar(&opts.ProfileName, "profile", "", "review profile; defaults to standard")
+	fs.StringVar(&opts.Instructions, "instructions", "", "additional review instructions")
+	fs.StringVar(&opts.ReturnFormat, "return-format", "markdown", "review output format")
+	fs.StringVar(&output, "output", "", "write dry-run request JSON to this path")
+	fs.BoolVar(&dryRun, "dry-run", false, "build and print the review request without submitting it")
+	fs.BoolVar(&wait, "wait", false, "wait for the remote review to finish")
+	fs.BoolVar(&opts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service submit [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Dir = "."
+	req, err := service.BuildReviewRequest(context.Background(), opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "build review request failed: %v\n", err)
+		os.Exit(1)
+	}
+	data, err := req.JSON()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "encode review request failed: %v\n", err)
+		os.Exit(1)
+	}
+	if output != "" {
+		if err := os.WriteFile(output, data, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Print(string(data))
+	}
+	if dryRun {
+		return
+	}
+	_ = wait
+	fmt.Fprintln(os.Stderr, "service submit is not connected to the review API yet; rerun with --dry-run")
+	os.Exit(1)
 }
 
 func runReview(args []string) {
@@ -202,6 +276,7 @@ Usage:
   codex-reviewer install [flags] /path/to/project
   codex-reviewer doctor [flags] /path/to/project
   codex-reviewer review pre-push [flags]
+  codex-reviewer service submit [flags]
   codex-reviewer version
 
 `, version)
@@ -212,6 +287,15 @@ func reviewUsage() {
 
 Usage:
   codex-reviewer review pre-push [flags]
+
+`)
+}
+
+func serviceUsage() {
+	fmt.Fprintf(os.Stderr, `codex-reviewer service
+
+Usage:
+  codex-reviewer service submit [flags]
 
 `)
 }
