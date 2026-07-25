@@ -63,6 +63,15 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 		map[string]string{"name": "HTTPS_PROXY", "value": opts.ProxyURL},
 		map[string]string{"name": "HTTP_PROXY", "value": opts.ProxyURL},
 		map[string]string{"name": "ALL_PROXY", "value": opts.ProxyURL},
+		map[string]any{
+			"name": "CODEX_API_KEY",
+			"valueFrom": map[string]any{
+				"secretKeyRef": map[string]string{
+					"name": opts.OpenAISecretName,
+					"key":  opts.OpenAISecretKey,
+				},
+			},
+		},
 	}
 	if opts.GitHubSecretName != "" {
 		reviewerEnv = append(reviewerEnv, map[string]any{

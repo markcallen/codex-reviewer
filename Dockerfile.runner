@@ -1,0 +1,19 @@
+FROM golang:1.25-bookworm AS build
+
+WORKDIR /src
+COPY go.mod ./
+COPY . .
+RUN go build -ldflags "-X main.version=${VERSION:-dev}" -o /out/codex-reviewer ./cmd/codex-reviewer
+
+FROM node:24-bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates git openssh-client ripgrep \
+  && npm install -g @openai/codex \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/codex-reviewer /usr/local/bin/codex-reviewer
+
+WORKDIR /workspace
+ENTRYPOINT ["codex-reviewer"]
+

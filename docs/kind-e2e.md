@@ -18,6 +18,19 @@ five small and five large, selected by GitHub `diskUsage`.
 
 ## Environment
 
+Build and load the runner image:
+
+```bash
+docker build -f Dockerfile.runner -t codex-reviewer:phase1 .
+kind load docker-image codex-reviewer:phase1 --name codex-reviewer-e2e
+```
+
+Build or provide an egress proxy image and load it into kind:
+
+```bash
+kind load docker-image openai-egress:phase1 --name codex-reviewer-e2e
+```
+
 ```bash
 export RUN_KIND_E2E=1
 export CODEX_REVIEWER_REVIEWER_IMAGE=codex-reviewer:phase1
@@ -46,4 +59,3 @@ namespace if needed, resolves each selected repository's default branch SHA with
 Job to complete.
 
 The test skips by default unless `RUN_KIND_E2E=1` is set.
-

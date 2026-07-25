@@ -61,6 +61,9 @@ func TestJobManifestIncludesReviewerAndSidecar(t *testing.T) {
 	if !strings.Contains(string(data), "GITHUB_TOKEN") {
 		t.Fatalf("manifest missing GitHub token env:\n%s", data)
 	}
+	if !strings.Contains(string(data), "CODEX_API_KEY") {
+		t.Fatalf("manifest missing Codex API key env:\n%s", data)
+	}
 	if strings.Contains(string(data), "sk-") {
 		t.Fatalf("manifest appears to contain a raw API key:\n%s", data)
 	}
