@@ -34,6 +34,16 @@ func TestLocalReviewArgsDiffReviewWithBase(t *testing.T) {
 	}
 }
 
+func TestLocalReviewArgsDiffReviewWithInstructions(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"exec review", "--base origin/main", "--output-last-message", "Focus on security."} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %v", want, args)
+		}
+	}
+}
+
 func TestLocalReviewArgsFullOverridesBase(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main", Full: true}, "codex-review/full-review.md")
 	joined := strings.Join(args, " ")

@@ -75,7 +75,11 @@ func RunLocal(ctx context.Context, opts LocalOptions) error {
 func localReviewArgs(opts LocalOptions, reportPath string) []string {
 	instructions := strings.TrimSpace(opts.Instructions)
 	if opts.Base != "" && !opts.Full {
-		return []string{"exec", "review", "--base", opts.Base, "--output-last-message", reportPath}
+		args := []string{"exec", "review", "--base", opts.Base, "--output-last-message", reportPath}
+		if instructions != "" {
+			args = append(args, instructions)
+		}
+		return args
 	}
 	prompt := instructions
 	if prompt == "" {
