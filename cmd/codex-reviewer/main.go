@@ -248,6 +248,7 @@ func runServiceSubmit(args []string) {
 	var apiURL string
 	var dryRun bool
 	var wait bool
+	var waitTimeout time.Duration
 	reviewerCfg := codexconfig.LoadReviewerConfig()
 	defaultAPIURL := os.Getenv("CODEX_REVIEWER_API_URL")
 	if defaultAPIURL == "" && reviewerCfg.Backend == "k8s" {
@@ -265,6 +266,7 @@ func runServiceSubmit(args []string) {
 	fs.StringVar(&output, "output", "", "write dry-run request JSON to this path")
 	fs.BoolVar(&dryRun, "dry-run", false, "build and print the review request without submitting it")
 	fs.BoolVar(&wait, "wait", false, "wait for the remote review to finish")
+	fs.DurationVar(&waitTimeout, "timeout", 10*time.Minute, "maximum time to wait for the review report when --wait is set")
 	fs.BoolVar(&opts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service submit [flags]\n\n")
@@ -308,7 +310,9 @@ func runServiceSubmit(args []string) {
 		os.Exit(1)
 	}
 	if wait {
-		report, err := service.Client{BaseURL: apiURL}.WaitReport(context.Background(), resp.ReportURL, 5*time.Second)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), waitTimeout)
+		defer waitCancel()
+		report, err := service.Client{BaseURL: apiURL}.WaitReport(waitCtx, resp.ReportURL, 5*time.Second)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wait for review report failed: %v\n", err)
 			os.Exit(1)

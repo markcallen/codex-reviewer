@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+*.local
+bin/
+coverage/
+codex-review/
+.tools/
+.idea/
+.vscode/
+*.swp
+*.swo

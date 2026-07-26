@@ -258,6 +258,20 @@ func assertContains(t *testing.T, got, want string) {
 	}
 }
 
+func TestInstallRejectsAGENTSFileTraversal(t *testing.T) {
+	dir := t.TempDir()
+	cases := []string{"../../etc/passwd", "../outside", "/absolute/path"}
+	for _, path := range cases {
+		_, err := Install(Options{TargetDir: dir, AGENTSFile: path})
+		if err == nil {
+			t.Fatalf("Install(AGENTSFile=%q) expected error, got nil", path)
+		}
+		if !strings.Contains(err.Error(), "relative path") {
+			t.Fatalf("Install(AGENTSFile=%q) error = %v, want traversal message", path, err)
+		}
+	}
+}
+
 func readFile(t *testing.T, dir, rel string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))

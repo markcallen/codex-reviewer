@@ -61,6 +61,37 @@ func TestBuildReviewRequestDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildReviewRequestScrubsCredentialedURL(t *testing.T) {
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		RepoURL:          "https://token:secret@github.com/org/repo.git",
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if strings.Contains(req.RepoURL, "secret") || strings.Contains(req.RepoURL, "token:") {
+		t.Fatalf("RepoURL still contains credentials: %q", req.RepoURL)
+	}
+	if !strings.Contains(req.RepoURL, "github.com/org/repo.git") {
+		t.Fatalf("RepoURL lost the host/path: %q", req.RepoURL)
+	}
+}
+
+func TestBuildReviewRequestPreservesPlainURL(t *testing.T) {
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		RepoURL:          "https://github.com/org/repo.git",
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.RepoURL != "https://github.com/org/repo.git" {
+		t.Fatalf("RepoURL changed unexpectedly: %q", req.RepoURL)
+	}
+}
+
 func TestReviewRequestJSONIncludesProfileConfig(t *testing.T) {
 	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
 		Dir:              t.TempDir(),

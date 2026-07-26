@@ -69,6 +69,9 @@ func Install(opts Options) (Result, error) {
 	if opts.AGENTSFile == "" {
 		opts.AGENTSFile = "AGENTS.md"
 	}
+	if cleaned := filepath.ToSlash(filepath.Clean(opts.AGENTSFile)); filepath.IsAbs(opts.AGENTSFile) || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return Result{}, fmt.Errorf("--agents-file must be a relative path within the target directory, got %q", opts.AGENTSFile)
+	}
 	if opts.Version == "" {
 		opts.Version = "dev"
 	}

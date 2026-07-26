@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 )
@@ -73,6 +74,7 @@ func BuildReviewRequest(ctx context.Context, opts SubmitOptions) (ReviewRequest,
 		}
 		repoURL = strings.TrimSpace(repoURL)
 	}
+	repoURL = scrubURLCredentials(repoURL)
 
 	headSHA := strings.TrimSpace(opts.HeadSHA)
 	if headSHA == "" {
@@ -102,6 +104,15 @@ func (r ReviewRequest) JSON() ([]byte, error) {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func scrubURLCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
