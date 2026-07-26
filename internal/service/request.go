@@ -106,13 +106,19 @@ func (r ReviewRequest) JSON() ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
+// scrubURLCredentials removes userinfo from http/https URLs. SSH URLs are left
+// intact because the username (e.g. "git") is required for authentication.
 func scrubURLCredentials(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {
 		return raw
 	}
-	u.User = nil
-	return u.String()
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		u.User = nil
+		return u.String()
+	}
+	return raw
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {

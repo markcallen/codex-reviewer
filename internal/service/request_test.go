@@ -78,6 +78,21 @@ func TestBuildReviewRequestScrubsCredentialedURL(t *testing.T) {
 	}
 }
 
+func TestBuildReviewRequestPreservesSSHUsername(t *testing.T) {
+	sshURL := "ssh://git@github.com/org/repo.git"
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		RepoURL:          sshURL,
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.RepoURL != sshURL {
+		t.Fatalf("SSH URL was modified: got %q, want %q", req.RepoURL, sshURL)
+	}
+}
+
 func TestBuildReviewRequestPreservesPlainURL(t *testing.T) {
 	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
 		RepoURL:          "https://github.com/org/repo.git",
