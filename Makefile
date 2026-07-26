@@ -16,6 +16,9 @@ NAMESPACE ?= codex-reviewer-e2e
 SERVICE_ACCOUNT ?= codex-reviewer
 RUNNER_IMAGE ?= codex-reviewer:phase1
 SIDECAR_IMAGE ?= openai-egress:phase1
+GHCR_IMAGE ?= ghcr.io/everydaydevops/codex-code-reviewer
+GHCR_TAG ?= $(VERSION)
+GHCR_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_TAG)
 OPENAI_SECRET ?= openai-api
 OPENAI_SECRET_KEY ?= api-key
 GITHUB_SECRET ?= github-token
@@ -25,7 +28,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -40,6 +43,9 @@ help:
 		'  make deps               Install dev tools and download Go modules' \
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
+		'  make docker-build-runner Build the local reviewer container image' \
+		'  make docker-tag-runner   Tag the reviewer image for GHCR' \
+		'  make docker-push-runner  Push the reviewer image to GHCR' \
 		'  make e2e                Run the kind e2e review test' \
 		'  make e2e-small          Run the kind e2e against one small repo' \
 		'  make clean              Remove local build output' \
@@ -57,6 +63,7 @@ help:
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
+		'  GHCR_RUNNER_IMAGE=$(GHCR_RUNNER_IMAGE)' \
 		'  OPENAI_SECRET=$(OPENAI_SECRET)' \
 		'  GITHUB_SECRET=$(GITHUB_SECRET)'
 
@@ -156,6 +163,12 @@ docker-build-runner: build
 
 docker-build-sidecar:
 	docker build -f Dockerfile.egress -t "$(SIDECAR_IMAGE)" .
+
+docker-tag-runner: docker-build-runner
+	docker tag "$(RUNNER_IMAGE)" "$(GHCR_RUNNER_IMAGE)"
+
+docker-push-runner: docker-tag-runner
+	docker push "$(GHCR_RUNNER_IMAGE)"
 
 kind-load-runner: kind-create docker-build-runner
 	kind load docker-image "$(RUNNER_IMAGE)" --name "$(KIND_CLUSTER)"

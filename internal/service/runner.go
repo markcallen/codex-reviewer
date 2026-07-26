@@ -104,7 +104,7 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o600); err != nil {
 		return fmt.Errorf("write request.json: %w", err)
 	}
 	if err := waitForLocalProxy(ctx, 30*time.Second); err != nil {
@@ -146,17 +146,21 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := writeMetadata(metadataPath, metadata); err != nil {
 		return err
 	}
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: wrote %s and %s\n", reportPath, metadataPath)
+	reportData, err := os.ReadFile(reportPath)
+	if err != nil {
+		return fmt.Errorf("read review report for stdout: %w", err)
+	}
+	_, _ = opts.Stdout.Write(reportData)
 	return nil
 }
 
 func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewRequest, reportPath string) error {
-	var rewrite string
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		rewrite = "url.https://x-access-token:" + token + "@github.com/.insteadOf"
+		rewrite := "url.https://x-access-token:" + token + "@github.com/.insteadOf"
 		if err := opts.Runner.Run(ctx, "", "git", "config", "--global", rewrite, "https://github.com/"); err != nil {
 			return fmt.Errorf("configure GitHub credentials: %w", err)
 		}
+		defer opts.Runner.Run(context.Background(), "", "git", "config", "--global", "--unset-all", rewrite) //nolint:errcheck
 	}
 	if err := opts.Runner.Run(ctx, "", "git", "clone", "--no-checkout", req.RepoURL, opts.Workspace); err != nil {
 		return fmt.Errorf("clone repository: %w", err)
@@ -177,16 +181,12 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "remote", "set-url", "origin", req.RepoURL); err != nil {
 		return fmt.Errorf("sanitize repository remote: %w", err)
 	}
-	if rewrite != "" {
-		if err := opts.Runner.Run(ctx, "", "git", "config", "--global", "--unset-all", rewrite); err != nil {
-			return fmt.Errorf("remove GitHub credential rewrite: %w", err)
-		}
-	}
 	args := []string{
 		"exec", "review",
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
+		reviewPrompt(req),
 	}
 	if err := opts.Runner.Run(ctx, opts.Workspace, "codex", args...); err != nil {
 		return fmt.Errorf("run codex review: %w", err)

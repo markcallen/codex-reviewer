@@ -1,6 +1,9 @@
 # Kind E2E Review Test
 
-The kind e2e test is opt-in and gated behind the `e2e` build tag.
+The kind e2e test is opt-in and gated behind the `e2e` build tag. For normal
+individual-developer local runs, prefer the Docker/GHCR workflow in
+`docs/docker-ghcr.md`; this kind path exists to exercise the Kubernetes job
+integration.
 
 By default, `make e2e` reviews one small private repository and one large
 private repository from `e2e/repos.json`. The fixture contains 10 private

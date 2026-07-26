@@ -13,7 +13,14 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /out/codex-reviewer /usr/local/bin/codex-reviewer
+COPY .codex /opt/codex-reviewer/codex
+COPY scripts/docker-entrypoint.sh /usr/local/bin/codex-reviewer-docker-entrypoint
+
+RUN chmod +x /usr/local/bin/codex-reviewer-docker-entrypoint \
+  && chmod -R a+rX /opt/codex-reviewer
+
+ENV CODEX_HOME=/tmp/codex-home
 
 WORKDIR /workspace
-ENTRYPOINT ["codex-reviewer"]
-
+ENTRYPOINT ["codex-reviewer-docker-entrypoint"]
+CMD ["codex-reviewer"]

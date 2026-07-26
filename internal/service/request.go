@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 )
@@ -73,6 +74,7 @@ func BuildReviewRequest(ctx context.Context, opts SubmitOptions) (ReviewRequest,
 		}
 		repoURL = strings.TrimSpace(repoURL)
 	}
+	repoURL = scrubURLCredentials(repoURL)
 
 	headSHA := strings.TrimSpace(opts.HeadSHA)
 	if headSHA == "" {
@@ -102,6 +104,21 @@ func (r ReviewRequest) JSON() ([]byte, error) {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+// scrubURLCredentials removes userinfo from http/https URLs. SSH URLs are left
+// intact because the username (e.g. "git") is required for authentication.
+func scrubURLCredentials(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.User == nil {
+		return raw
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		u.User = nil
+		return u.String()
+	}
+	return raw
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {

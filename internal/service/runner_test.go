@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -80,13 +81,10 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
+	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer", "standard"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
-	}
-	if strings.Contains(args, "code_reviewer") {
-		t.Fatalf("codex exec review --base must not include a prompt argument: %v", last.Args)
 	}
 
 	metadata := readMetadata(t, filepath.Join(out, "metadata.json"))
@@ -98,6 +96,31 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 	}
 	if metadata.Profile != "standard" || metadata.Model != "gpt-5.5" {
 		t.Fatalf("metadata profile/model = %#v", metadata)
+	}
+}
+
+func TestRunReviewJobWritesReportToStdout(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	out := t.TempDir()
+	req := testRunnerRequest(t)
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	var stdout bytes.Buffer
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		ReviewID:    "review-stdout",
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   out,
+		Runner:      &fakeCommandRunner{},
+		Stdout:      &stdout,
+	})
+	if err != nil {
+		t.Fatalf("RunReviewJob() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Approve with fixes") {
+		t.Fatalf("stdout does not contain report content: %q", stdout.String())
 	}
 }
 
@@ -166,8 +189,8 @@ func TestRunReviewJobConfiguresGitHubTokenWhenPresent(t *testing.T) {
 		t.Fatalf("remote URL was not sanitized before codex: %#v", runner.commands)
 	}
 	unsetIndex := commandIndexWithArgs(runner.commands, "git", "config", "--global", "--unset-all")
-	if unsetIndex < 0 || unsetIndex > codexIndex {
-		t.Fatalf("credential rewrite was not removed before codex: %#v", runner.commands)
+	if unsetIndex < 0 || unsetIndex < codexIndex {
+		t.Fatalf("credential rewrite was not cleaned up after codex: %#v", runner.commands)
 	}
 }
 

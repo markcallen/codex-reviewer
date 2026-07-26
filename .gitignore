@@ -11,6 +11,7 @@ Thumbs.db
 *.swo
 bin/
 coverage/
+codex-review/
 
 # Local env files
 .env

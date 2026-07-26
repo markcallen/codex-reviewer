@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/everydaydevops/codex-code-reviewer/internal/codexconfig"
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/service"
@@ -24,6 +27,8 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "setup":
+		runSetup(os.Args[2:])
 	case "install":
 		runInstall(os.Args[2:])
 	case "doctor":
@@ -67,7 +72,7 @@ func runWorkflowRun(args []string) {
 	fs := flag.NewFlagSet("workflow run", flag.ExitOnError)
 	fs.StringVar(&opts.CommitMessage, "commit-message", "", "commit message for git commit")
 	fs.StringVar(&opts.UnitTest, "unit-test", "", "unit test command")
-	fs.StringVar(&opts.Review, "review", "", "review command; defaults to service submit")
+	fs.StringVar(&opts.Review, "review", "", "review command; defaults to local review")
 	fs.StringVar(&opts.Fix, "fix", "", "fix command to run after review")
 	fs.StringVar(&opts.E2E, "e2e-test", "", "e2e test command")
 	fs.BoolVar(&opts.Push, "push", false, "push to the configured remote after e2e tests pass")
@@ -243,8 +248,14 @@ func runServiceSubmit(args []string) {
 	var apiURL string
 	var dryRun bool
 	var wait bool
+	var waitTimeout time.Duration
+	reviewerCfg := codexconfig.LoadReviewerConfig()
+	defaultAPIURL := os.Getenv("CODEX_REVIEWER_API_URL")
+	if defaultAPIURL == "" && reviewerCfg.Backend == "k8s" {
+		defaultAPIURL = reviewerCfg.K8sAPIURL
+	}
 	fs := flag.NewFlagSet("service submit", flag.ExitOnError)
-	fs.StringVar(&apiURL, "api-url", os.Getenv("CODEX_REVIEWER_API_URL"), "review API base URL; defaults to CODEX_REVIEWER_API_URL")
+	fs.StringVar(&apiURL, "api-url", defaultAPIURL, "review API base URL; defaults to CODEX_REVIEWER_API_URL or [codex_reviewer].k8s_api_url when backend is k8s")
 	fs.StringVar(&opts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
 	fs.StringVar(&opts.BaseRef, "base", "", "base branch/ref; defaults to origin/main")
 	fs.StringVar(&opts.HeadRef, "head", "", "head branch/ref; defaults to HEAD")
@@ -255,6 +266,7 @@ func runServiceSubmit(args []string) {
 	fs.StringVar(&output, "output", "", "write dry-run request JSON to this path")
 	fs.BoolVar(&dryRun, "dry-run", false, "build and print the review request without submitting it")
 	fs.BoolVar(&wait, "wait", false, "wait for the remote review to finish")
+	fs.DurationVar(&waitTimeout, "timeout", 10*time.Minute, "maximum time to wait for the review report when --wait is set")
 	fs.BoolVar(&opts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service submit [flags]\n\n")
@@ -289,7 +301,7 @@ func runServiceSubmit(args []string) {
 		return
 	}
 	if apiURL == "" {
-		fmt.Fprintln(os.Stderr, "service submit requires --api-url or CODEX_REVIEWER_API_URL; use --dry-run to inspect the request")
+		fmt.Fprintln(os.Stderr, "service submit requires --api-url, CODEX_REVIEWER_API_URL, or [codex_reviewer].k8s_api_url with backend = \"k8s\"; use --dry-run to inspect the request")
 		os.Exit(1)
 	}
 	resp, err := service.Client{BaseURL: apiURL}.Submit(context.Background(), req)
@@ -298,7 +310,9 @@ func runServiceSubmit(args []string) {
 		os.Exit(1)
 	}
 	if wait {
-		report, err := service.Client{BaseURL: apiURL}.WaitReport(context.Background(), resp.ReportURL, 5*time.Second)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), waitTimeout)
+		defer waitCancel()
+		report, err := service.Client{BaseURL: apiURL}.WaitReport(waitCtx, resp.ReportURL, 5*time.Second)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wait for review report failed: %v\n", err)
 			os.Exit(1)
@@ -328,6 +342,8 @@ func runReview(args []string) {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "local":
+		runReviewLocal(args[1:])
 	case "pre-push":
 		runReviewPrePush(args[1:])
 	case "-h", "--help", "help":
@@ -336,6 +352,34 @@ func runReview(args []string) {
 		fmt.Fprintf(os.Stderr, "unknown review command: %s\n\n", args[0])
 		reviewUsage()
 		os.Exit(2)
+	}
+}
+
+func runReviewLocal(args []string) {
+	cfg := codexconfig.LoadReviewerConfig()
+	var opts reviewer.LocalOptions
+	fs := flag.NewFlagSet("review local", flag.ExitOnError)
+	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
+	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
+	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex command without running it")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review local [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Dir = "."
+	opts.Stdout = os.Stdout
+	opts.Stderr = os.Stderr
+	if err := reviewer.RunLocal(context.Background(), opts); err != nil {
+		fmt.Fprintf(os.Stderr, "local review failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -409,6 +453,99 @@ func runInstall(args []string) {
 	fmt.Println("  git status --short")
 	fmt.Println("  codex-reviewer doctor .")
 	fmt.Println("  codex review --base main")
+}
+
+func runSetup(args []string) {
+	var opts installer.GlobalOptions
+	var yes bool
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	fs.StringVar(&opts.CodexHome, "codex-home", "", "Codex home directory; defaults to CODEX_HOME or ~/.codex")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print planned changes without writing files")
+	fs.BoolVar(&yes, "yes", false, "apply setup changes without prompting")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer setup [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	planOpts := opts
+	planOpts.DryRun = true
+	result, err := installer.InstallGlobal(planOpts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	if opts.DryRun {
+		fmt.Println("Dry run complete.")
+		fmt.Println()
+		printActions(result.Actions)
+		printWarnings(result.Warnings)
+		return
+	}
+
+	if allSkipped(result.Actions) {
+		fmt.Println("Setup already complete.")
+		fmt.Println()
+		printActions(result.Actions)
+		printWarnings(result.Warnings)
+		return
+	}
+
+	fmt.Println("Setup will make these changes:")
+	fmt.Println()
+	printActions(result.Actions)
+	printWarnings(result.Warnings)
+	if !yes && !confirm("Apply these changes now? [y/N] ") {
+		fmt.Println()
+		fmt.Println("Setup canceled.")
+		return
+	}
+
+	opts.DryRun = false
+	result, err = installer.InstallGlobal(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "setup failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println()
+	fmt.Println("Setup complete.")
+	fmt.Println()
+	printActions(result.Actions)
+	printWarnings(result.Warnings)
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  codex-reviewer review local")
+}
+
+func allSkipped(actions []installer.Action) bool {
+	if len(actions) == 0 {
+		return false
+	}
+	for _, action := range actions {
+		if action.Status != "skip" {
+			return false
+		}
+	}
+	return true
+}
+
+func confirm(prompt string) bool {
+	fmt.Print(prompt)
+	reader := bufio.NewReader(os.Stdin)
+	reply, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(reply)) {
+	case "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 func runDoctor(args []string) {
@@ -485,8 +622,10 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `codex-reviewer %s
 
 Usage:
+  codex-reviewer setup [flags]
   codex-reviewer install [flags] /path/to/project
   codex-reviewer doctor [flags] /path/to/project
+  codex-reviewer review local [flags]
   codex-reviewer review pre-push [flags]
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
@@ -502,6 +641,7 @@ func reviewUsage() {
 	fmt.Fprintf(os.Stderr, `codex-reviewer review
 
 Usage:
+  codex-reviewer review local [flags]
   codex-reviewer review pre-push [flags]
 
 `)

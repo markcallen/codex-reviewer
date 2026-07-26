@@ -97,7 +97,7 @@ func (d *doctorRun) checkConfig() {
 		d.add("incomplete", dest, "missing "+strings.Join(missing, ", "))
 		return
 	}
-	d.add("ok", dest, "review_model and agent limits are configured")
+	d.add("ok", dest, "review_model, agent limits, and reviewer backend are configured")
 }
 
 func (d *doctorRun) checkReviewerConfig() {
@@ -232,23 +232,38 @@ func missingConfigKeys(current []byte) []string {
 	}
 	start, end := findSection(lines, "agents")
 	if start == -1 {
-		return append(missing, "[agents].max_threads", "[agents].max_depth")
-	}
-	hasThreads := false
-	hasDepth := false
-	for _, line := range lines[start+1 : end] {
-		if keyLineMatches(line, "max_threads") {
-			hasThreads = true
+		missing = append(missing, "[agents].max_threads", "[agents].max_depth")
+	} else {
+		hasThreads := false
+		hasDepth := false
+		for _, line := range lines[start+1 : end] {
+			if keyLineMatches(line, "max_threads") {
+				hasThreads = true
+			}
+			if keyLineMatches(line, "max_depth") {
+				hasDepth = true
+			}
 		}
-		if keyLineMatches(line, "max_depth") {
-			hasDepth = true
+		if !hasThreads {
+			missing = append(missing, "[agents].max_threads")
+		}
+		if !hasDepth {
+			missing = append(missing, "[agents].max_depth")
 		}
 	}
-	if !hasThreads {
-		missing = append(missing, "[agents].max_threads")
+
+	start, end = findSection(lines, "codex_reviewer")
+	if start == -1 {
+		return append(missing, "[codex_reviewer].backend", "[codex_reviewer].report", "[codex_reviewer].k8s_api_url")
 	}
-	if !hasDepth {
-		missing = append(missing, "[agents].max_depth")
+	if !sectionHasKey(lines[start+1:end], "backend") {
+		missing = append(missing, "[codex_reviewer].backend")
+	}
+	if !sectionHasKey(lines[start+1:end], "report") {
+		missing = append(missing, "[codex_reviewer].report")
+	}
+	if !sectionHasKey(lines[start+1:end], "k8s_api_url") {
+		missing = append(missing, "[codex_reviewer].k8s_api_url")
 	}
 	return missing
 }
