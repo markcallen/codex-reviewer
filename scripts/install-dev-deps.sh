@@ -5,6 +5,7 @@ GO_MIN_VERSION="${GO_MIN_VERSION:-1.25}"
 GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.25.0}"
 KIND_VERSION="${KIND_VERSION:-v0.30.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-stable}"
+GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v1.64.8}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 BIN_DIR="${ROOT_DIR}/bin"
 TOOLS_DIR="${ROOT_DIR}/.tools"
@@ -102,6 +103,14 @@ install_kubectl() {
   chmod +x "${BIN_DIR}/kubectl"
 }
 
+install_golangci_lint() {
+  if have golangci-lint; then
+    echo "golangci-lint already installed"
+    return
+  fi
+  GOBIN="$BIN_DIR" go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+}
+
 install_with_package_manager() {
   tool="$1"
   brew_pkg="$2"
@@ -124,6 +133,7 @@ install_with_package_manager() {
 }
 
 install_go
+install_golangci_lint
 install_kind
 install_kubectl
 install_with_package_manager docker docker docker.io

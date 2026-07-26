@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +81,38 @@ func TestAPIServerCreatesReviewJob(t *testing.T) {
 	}
 	if reportRec.Body.String() != "No blocking findings\n" {
 		t.Fatalf("report body = %q", reportRec.Body.String())
+	}
+}
+
+func TestAPIServerHealthAndReadiness(t *testing.T) {
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{path: "/healthz", want: `"status":"ok"`},
+		{path: "/readyz", want: `"status":"ready"`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("body = %s, want %s", rec.Body.String(), tc.want)
+			}
+		})
 	}
 }
 
@@ -211,6 +245,36 @@ func TestClientWaitReportRetriesUntilAvailable(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if string(report) != "No blocking findings\n" {
+		t.Fatalf("report = %q", report)
+	}
+}
+
+func TestKubectlApplierAndReportReader(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "kubectl.log")
+	kubectlPath := filepath.Join(binDir, "kubectl")
+	script := `#!/bin/sh
+echo "$@" >> "` + logPath + `"
+for arg in "$@"; do
+  if [ "$arg" = "logs" ]; then
+    printf 'No blocking findings\n'
+    exit 0
+  fi
+done
+`
+	if err := os.WriteFile(kubectlPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := (KubectlApplier{}).Apply(context.Background(), []byte(`{"kind":"Job"}`)); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	report, err := (KubectlReportReader{}).ReadReport(context.Background(), "reviews", "job-1")
+	if err != nil {
+		t.Fatalf("ReadReport() error = %v", err)
 	}
 	if string(report) != "No blocking findings\n" {
 		t.Fatalf("report = %q", report)

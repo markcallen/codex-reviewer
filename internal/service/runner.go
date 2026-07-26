@@ -186,7 +186,6 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
-		reviewPrompt(req),
 	}
 	if err := opts.Runner.Run(ctx, opts.Workspace, "codex", args...); err != nil {
 		return fmt.Errorf("run codex review: %w", err)

@@ -109,7 +109,7 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 						map[string]any{
 							"name":  "reviewer",
 							"image": opts.ReviewerImage,
-							"args":  []string{"service", "runner"},
+							"args":  []string{"codex-reviewer", "service", "runner"},
 							"env":   reviewerEnv,
 							"volumeMounts": []any{
 								map[string]string{"name": "workspace", "mountPath": "/workspace"},

@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'test -z "$(gofmt -l cmd internal e2e 2>/dev/null)"'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: go-lint
+        name: Go lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: go-unit-tests
+        name: Go unit tests with coverage
+        entry: make coverage-check COVERAGE_THRESHOLD=75.0
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

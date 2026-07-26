@@ -47,14 +47,15 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 	githubSecret := requireEnv(t, "CODEX_REVIEWER_GITHUB_SECRET")
 	namespace := envDefault("CODEX_REVIEWER_NAMESPACE", "codex-reviewer-e2e")
 	cluster := envDefault("CODEX_REVIEWER_KIND_CLUSTER", "codex-reviewer-e2e")
+	kubeContext := envDefault("CODEX_REVIEWER_KUBE_CONTEXT", "kind-"+cluster)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 
 	ensureKindCluster(t, ctx, cluster)
-	ensureNamespace(t, ctx, namespace)
-	ensureSecretFromEnv(t, ctx, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
-	ensureSecretFromEnv(t, ctx, namespace, githubSecret, "token", "GITHUB_TOKEN")
+	ensureNamespace(t, ctx, kubeContext, namespace)
+	ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+	ensureSecretFromEnv(t, ctx, kubeContext, namespace, githubSecret, "token", "GITHUB_TOKEN")
 
 	fixtures := loadFixtures(t)
 	cases := selectRepos(t, fixtures)
@@ -85,13 +86,13 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			}
 			jobName := service.JobName("e2e-" + sanitizeName(repo.Name))
 			t.Logf("job=%s namespace=%s reviewer_image=%s sidecar_image=%s", jobName, namespace, reviewerImage, sidecarImage)
-			deleteJobIfExists(t, ctx, namespace, jobName)
-			applyManifest(t, ctx, manifest)
+			deleteJobIfExists(t, ctx, kubeContext, namespace, jobName)
+			applyManifest(t, ctx, kubeContext, manifest)
 			t.Cleanup(func() {
-				deleteJobIfExists(t, context.Background(), namespace, jobName)
+				deleteJobIfExists(t, context.Background(), kubeContext, namespace, jobName)
 			})
-			waitForReviewerContainer(t, ctx, namespace, jobName, 40*time.Minute)
-			logs := output(t, ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
+			waitForReviewerContainer(t, ctx, kubeContext, namespace, jobName, 40*time.Minute)
+			logs := output(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
 			t.Logf("code review output for %s@%s:\n%s", repo.Name, branch.HeadSHA, string(logs))
 			assertReviewRan(t, string(logs))
 		})
@@ -111,15 +112,15 @@ func ensureKindCluster(t *testing.T, ctx context.Context, cluster string) {
 	run(t, ctx, "", "kind", "create", "cluster", "--name", cluster)
 }
 
-func ensureNamespace(t *testing.T, ctx context.Context, namespace string) {
+func ensureNamespace(t *testing.T, ctx context.Context, kubeContext, namespace string) {
 	t.Helper()
-	if err := command(ctx, "", "kubectl", "get", "namespace", namespace).Run(); err == nil {
+	if err := command(ctx, "", "kubectl", "--context", kubeContext, "get", "namespace", namespace).Run(); err == nil {
 		return
 	}
-	run(t, ctx, "", "kubectl", "create", "namespace", namespace)
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "create", "namespace", namespace)
 }
 
-func ensureSecretFromEnv(t *testing.T, ctx context.Context, namespace, secret, key, envName string) {
+func ensureSecretFromEnv(t *testing.T, ctx context.Context, kubeContext, namespace, secret, key, envName string) {
 	t.Helper()
 	value := requireEnv(t, envName)
 	tmp := t.TempDir()
@@ -127,17 +128,17 @@ func ensureSecretFromEnv(t *testing.T, ctx context.Context, namespace, secret, k
 	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
-	cmd := command(ctx, "", "kubectl", "-n", namespace, "create", "secret", "generic", secret, "--from-file="+key+"="+path, "--dry-run=client", "-o", "yaml")
+	cmd := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "create", "secret", "generic", secret, "--from-file="+key+"="+path, "--dry-run=client", "-o", "yaml")
 	yaml, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("kubectl create secret %s failed: %v", secret, err)
 	}
-	applyManifest(t, ctx, yaml)
+	applyManifest(t, ctx, kubeContext, yaml)
 }
 
-func applyManifest(t *testing.T, ctx context.Context, manifest []byte) {
+func applyManifest(t *testing.T, ctx context.Context, kubeContext string, manifest []byte) {
 	t.Helper()
-	cmd := command(ctx, "", "kubectl", "apply", "-f", "-")
+	cmd := command(ctx, "", "kubectl", "--context", kubeContext, "apply", "-f", "-")
 	cmd.Stdin = bytes.NewReader(manifest)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -145,11 +146,11 @@ func applyManifest(t *testing.T, ctx context.Context, manifest []byte) {
 	}
 }
 
-func waitForReviewerContainer(t *testing.T, ctx context.Context, namespace, jobName string, timeout time.Duration) {
+func waitForReviewerContainer(t *testing.T, ctx context.Context, kubeContext, namespace, jobName string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		out, err := command(ctx, "", "kubectl", "-n", namespace, "get", "pods", "-l", "job-name="+jobName, "-o", "jsonpath={.items[0].status.containerStatuses[?(@.name=='reviewer')].state.terminated.exitCode}").Output()
+		out, err := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "get", "pods", "-l", "job-name="+jobName, "-o", "jsonpath={.items[0].status.containerStatuses[?(@.name=='reviewer')].state.terminated.exitCode}").Output()
 		if err != nil {
 			time.Sleep(5 * time.Second)
 			continue
@@ -162,23 +163,31 @@ func waitForReviewerContainer(t *testing.T, ctx context.Context, namespace, jobN
 		case "0":
 			return
 		default:
-			logs := output(t, ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
+			logs := output(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
 			t.Fatalf("reviewer container exited with %s\n%s", exitCode, logs)
 		}
 	}
-	describe, _ := command(ctx, "", "kubectl", "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
-	logs, _ := command(ctx, "", "kubectl", "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+	describe, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
+	logs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
 	t.Fatalf("reviewer container did not finish within %s\n%s\n%s", timeout, describe, logs)
 }
 
-func deleteJobIfExists(t *testing.T, ctx context.Context, namespace, jobName string) {
+func deleteJobIfExists(t *testing.T, ctx context.Context, kubeContext, namespace, jobName string) {
 	t.Helper()
-	_ = command(ctx, "", "kubectl", "-n", namespace, "delete", "job", jobName, "--ignore-not-found=true", "--wait=true").Run()
+	_ = command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "delete", "job", jobName, "--ignore-not-found=true", "--wait=true").Run()
 }
 
 func assertReviewRan(t *testing.T, logs string) {
 	t.Helper()
 	if strings.Contains(logs, "Block") || strings.Contains(logs, "Approve with fixes") || strings.Contains(logs, "No blocking findings") {
+		return
+	}
+	if strings.Contains(logs, "Review comment:") ||
+		strings.Contains(logs, "no code changes to review") ||
+		strings.Contains(logs, "no introduced code changes to review") ||
+		strings.Contains(logs, "did not find any discrete, actionable bugs") ||
+		strings.Contains(logs, "did not find any discrete issue introduced by the patch") ||
+		strings.Contains(logs, "No actionable bugs were found in the diff") {
 		return
 	}
 	if strings.Contains(logs, "codex-reviewer: wrote") {

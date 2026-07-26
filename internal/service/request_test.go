@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -127,4 +128,38 @@ func TestReviewRequestJSONIncludesProfileConfig(t *testing.T) {
 			t.Fatalf("JSON() missing %s:\n%s", want, got)
 		}
 	}
+}
+
+func TestBuildReviewRequestReadsGitDefaults(t *testing.T) {
+	dir := initRequestGitRepo(t)
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		Dir:              dir,
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.RepoURL != "git@github.com:org/repo.git" {
+		t.Fatalf("RepoURL = %q", req.RepoURL)
+	}
+	if req.HeadRef != "HEAD" {
+		t.Fatalf("HeadRef = %q", req.HeadRef)
+	}
+}
+
+func initRequestGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-b", "main"},
+		{"remote", "add", "origin", "git@github.com:org/repo.git"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	return dir
 }

@@ -10,8 +10,10 @@ KUBECTL_VERSION ?= stable
 COVERAGE_DIR ?= coverage
 COVERAGE_PROFILE ?= $(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML ?= $(COVERAGE_DIR)/coverage.html
+COVERAGE_THRESHOLD ?= 75.0
 
 KIND_CLUSTER ?= codex-reviewer-e2e
+KUBE_CONTEXT ?= kind-$(KIND_CLUSTER)
 NAMESPACE ?= codex-reviewer-e2e
 SERVICE_ACCOUNT ?= codex-reviewer
 RUNNER_IMAGE ?= codex-reviewer:phase1
@@ -28,7 +30,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e kind-create kind-namespace kind-service-account kind-secrets docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -36,10 +38,12 @@ help:
 		'  make setup              Install deps, verify tools, build, and test' \
 		'  make build              Build bin/codex-reviewer' \
 		'  make test               Run unit tests with coverage' \
+		'  make coverage-check     Fail if total coverage is below threshold' \
 		'  make coverage-func      Print function-level coverage' \
 		'  make coverage-html      Generate HTML coverage report' \
 		'  make test-e2e           Compile e2e tests; skips unless RUN_KIND_E2E=1' \
 		'  make lint               Run gofmt check and go vet' \
+		'  make smoke              Build container and run packaged CLI smoke check' \
 		'  make deps               Install dev tools and download Go modules' \
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
@@ -57,9 +61,11 @@ help:
 		'  KIND_VERSION=$(KIND_VERSION)' \
 		'  KUBECTL_VERSION=$(KUBECTL_VERSION)' \
 		'  COVERAGE_PROFILE=$(COVERAGE_PROFILE)' \
+		'  COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD)' \
 		'  E2E_REPOS=$(E2E_REPOS)' \
 		'  E2E_SMALL_REPO=$(E2E_SMALL_REPO)' \
 		'  KIND_CLUSTER=$(KIND_CLUSTER)' \
+		'  KUBE_CONTEXT=$(KUBE_CONTEXT)' \
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
@@ -77,6 +83,15 @@ test:
 	go test -covermode=atomic -coverprofile="$(COVERAGE_PROFILE)" ./...
 	@go tool cover -func="$(COVERAGE_PROFILE)" | tail -1
 
+coverage-check: test
+	@total="$$(go tool cover -func="$(COVERAGE_PROFILE)" | awk '/^total:/ { sub(/%/,"",$$3); print $$3 }')"; \
+	awk -v total="$$total" -v threshold="$(COVERAGE_THRESHOLD)" 'BEGIN { \
+		if (total + 0 < threshold + 0) { \
+			printf "coverage %.1f%% is below required %.1f%%\n", total, threshold; exit 1 \
+		} \
+		printf "coverage %.1f%% meets required %.1f%%\n", total, threshold \
+	}'
+
 coverage-func: test
 	go tool cover -func="$(COVERAGE_PROFILE)"
 
@@ -89,6 +104,7 @@ test-e2e:
 
 lint:
 	@test -z "$$(gofmt -l cmd internal e2e 2>/dev/null)" || { echo 'gofmt needed:'; gofmt -l cmd internal e2e; exit 1; }
+	golangci-lint run
 	go vet ./...
 
 deps: deps-tools deps-go-mod
@@ -101,6 +117,9 @@ deps-go-mod:
 
 check-deps:
 	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/check-dev-deps.sh
+
+smoke:
+	sh scripts/smoke-docker.sh
 
 check-e2e-deps: check-deps
 	@if [ -n "$${OPENAI_API_KEY:-}" ]; then \
@@ -139,10 +158,10 @@ kind-create:
 	fi
 
 kind-namespace: kind-create
-	kubectl create namespace "$(NAMESPACE)" --dry-run=client -o yaml | kubectl apply -f -
+	kubectl --context "$(KUBE_CONTEXT)" create namespace "$(NAMESPACE)" --dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 kind-service-account: kind-namespace
-	kubectl -n "$(NAMESPACE)" create serviceaccount "$(SERVICE_ACCOUNT)" --dry-run=client -o yaml | kubectl apply -f -
+	kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create serviceaccount "$(SERVICE_ACCOUNT)" --dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 kind-secrets: kind-namespace
 	@[ -n "$${OPENAI_API_KEY:-}" ] || { echo 'OPENAI_API_KEY is required'; exit 1; }
@@ -151,12 +170,12 @@ kind-secrets: kind-namespace
 		trap 'rm -rf "$$tmpdir"' EXIT; \
 		printf '%s' "$$OPENAI_API_KEY" > "$$tmpdir/openai"; \
 		printf '%s' "$$GITHUB_TOKEN" > "$$tmpdir/github"; \
-		kubectl -n "$(NAMESPACE)" create secret generic "$(OPENAI_SECRET)" \
+		kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(OPENAI_SECRET)" \
 			--from-file="$(OPENAI_SECRET_KEY)=$$tmpdir/openai" \
-			--dry-run=client -o yaml | kubectl apply -f -; \
-		kubectl -n "$(NAMESPACE)" create secret generic "$(GITHUB_SECRET)" \
+			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -; \
+		kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(GITHUB_SECRET)" \
 			--from-file="$(GITHUB_SECRET_KEY)=$$tmpdir/github" \
-			--dry-run=client -o yaml | kubectl apply -f -
+			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 docker-build-runner: build
 	docker build -f Dockerfile.runner -t "$(RUNNER_IMAGE)" .
@@ -186,6 +205,7 @@ e2e: check-e2e-deps
 	CODEX_REVIEWER_GITHUB_SECRET="$(GITHUB_SECRET)" \
 	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
 	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \
+	CODEX_REVIEWER_KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	CODEX_REVIEWER_SERVICE_ACCOUNT="$(SERVICE_ACCOUNT)" \
 	CODEX_REVIEWER_E2E_REPOS="$(E2E_REPOS)" \
 	go test $(E2E_GO_TEST_FLAGS) -tags=e2e ./e2e -run "$(E2E_TEST)" -count=1
@@ -199,6 +219,7 @@ e2e-small: check-e2e-deps
 	CODEX_REVIEWER_GITHUB_SECRET="$(GITHUB_SECRET)" \
 	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
 	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \
+	CODEX_REVIEWER_KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	CODEX_REVIEWER_SERVICE_ACCOUNT="$(SERVICE_ACCOUNT)" \
 	CODEX_REVIEWER_E2E_REPOS="$(if $(E2E_REPOS),$(E2E_REPOS),$(E2E_SMALL_REPO))" \
 	go test $(E2E_GO_TEST_FLAGS) -tags=e2e ./e2e -run "$(E2E_TEST)" -count=1

@@ -62,6 +62,15 @@ check_gofmt() {
   print_check gofmt "$(command -v gofmt)" "bundled with Go" OK
 }
 
+check_golangci_lint() {
+  if ! command -v golangci-lint >/dev/null 2>&1; then
+    missing golangci-lint installed
+    return
+  fi
+  found="$(golangci-lint version | awk '{print $4}')"
+  print_check golangci "$found" installed OK
+}
+
 check_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     missing docker installed
@@ -109,6 +118,7 @@ check_gh() {
 
 check_go
 check_gofmt
+check_golangci_lint
 check_docker
 check_kind
 check_kubectl

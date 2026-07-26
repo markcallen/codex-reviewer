@@ -94,10 +94,9 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 		"exec", "review",
 		"--base", base,
 		"--output-last-message", reportPath,
-		"Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.",
 	}
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: running AI code review against %s\n", base)
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: report path %s\n", reportPath)
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: running AI code review against %s\n", base)
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: report path %s\n", reportPath)
 
 	if opts.DryRun {
 		fmt.Fprintf(opts.Stdout, "codex-reviewer: dry run: codex %s\n", strings.Join(args, " "))
@@ -134,7 +133,7 @@ func loadConfig(path string) (prePushConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return prePushConfig{}, fmt.Errorf("%s is missing; run codex-reviewer install .", ConfigFile)
+			return prePushConfig{}, fmt.Errorf("%s is missing; run codex-reviewer install", ConfigFile)
 		}
 		return prePushConfig{}, fmt.Errorf("read %s: %w", ConfigFile, err)
 	}
