@@ -5,7 +5,7 @@ GO_MIN_VERSION="${GO_MIN_VERSION:-1.25}"
 GO_INSTALL_VERSION="${GO_INSTALL_VERSION:-1.25.0}"
 KIND_VERSION="${KIND_VERSION:-v0.30.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-stable}"
-GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v1.64.8}"
+GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.12.2}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 BIN_DIR="${ROOT_DIR}/bin"
 TOOLS_DIR="${ROOT_DIR}/.tools"
@@ -108,7 +108,7 @@ install_golangci_lint() {
     echo "golangci-lint already installed"
     return
   fi
-  GOBIN="$BIN_DIR" go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+  GOBIN="$BIN_DIR" go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 }
 
 install_with_package_manager() {
