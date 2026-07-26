@@ -47,7 +47,7 @@ func Plan(opts Options) ([]Step, error) {
 	}
 	review := opts.Review
 	if review == "" {
-		review = "codex-reviewer service submit --base origin/main --head HEAD --profile standard --wait --output review.md"
+		review = "codex-reviewer review local --base origin/main --report codex-review/branch-review.md"
 	}
 	steps = append(steps, Step{Name: "review", Command: review})
 	if opts.Fix != "" {

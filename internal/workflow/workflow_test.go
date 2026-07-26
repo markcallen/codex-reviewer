@@ -38,7 +38,7 @@ func TestPlanBuildsDefaultWorkflow(t *testing.T) {
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("step names = %v, want %v", names, want)
 	}
-	if !strings.Contains(steps[4].Command, "codex-reviewer service submit") {
+	if !strings.Contains(steps[4].Command, "codex-reviewer review local") {
 		t.Fatalf("review command = %q", steps[4].Command)
 	}
 }

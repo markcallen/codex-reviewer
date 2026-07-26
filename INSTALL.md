@@ -9,7 +9,7 @@ This repository contains a project-scoped Codex reviewer setup:
 - `docs/code_review.md` — team review checklist referenced by `AGENTS.md`.
 - `prompts/` — copy/paste prompts for branch, PR, commit, and uncommitted-change reviews.
 - `cmd/codex-reviewer/` — a self-contained Go CLI with embedded artifacts.
-- `scripts/` — install helpers for project-scoped or global setup.
+- `scripts/` — development helpers.
 
 ## 1. Install Codex CLI
 
@@ -100,28 +100,32 @@ use a different reviewer than the one committed with the repository. Rerunning
 `codex-reviewer install` with a newer binary refreshes the recorded version
 without replacing the pre-push settings.
 
-## 5. Legacy shell installer
-
-The older shell installer still exists for simple copy-only installs:
-
-```bash
-./scripts/install-project.sh /path/to/your/repo
-```
-
-Prefer the Go installer for repositories that already have Codex or agent guidance configured.
-
-## 6. Global install option
+## 5. Local machine setup
 
 To use the reviewer in every repo without committing project files:
 
 ```bash
-./scripts/install-global.sh
+bin/codex-reviewer setup
 ```
 
-This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml`, checks
-`~/.codex/config.toml`, and asks before adding any missing reviewer settings.
+This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml` and
+merges missing reviewer settings into `~/.codex/config.toml` after showing the
+planned changes and asking for confirmation. Use `bin/codex-reviewer setup --yes`
+for unattended setup.
 
-## 7. Docker and GHCR local option
+The setup command also writes:
+
+```toml
+[codex_reviewer]
+backend = "local"
+report = "codex-review/full-review.md"
+k8s_api_url = ""
+```
+
+Keep `backend = "local"` for local machine reviews. To use a Kubernetes-backed
+review API, set `backend = "k8s"` and configure `k8s_api_url`.
+
+## 6. Docker and GHCR local option
 
 For individual developers who want an isolated local runtime without kind, build
 the reviewer image:
@@ -149,17 +153,15 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  -e REVIEW_BASE=origin/main \
-  -e REVIEW_REPORT=codex-review/docker-review.md \
   -v "$PWD:/workspace" \
   -w /workspace \
   "$GHCR_IMAGE:$GHCR_TAG" \
-  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
+  codex-reviewer review local
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker command and runtime options.
 
-## 8. Run it
+## 7. Run it
 
 Interactive:
 
@@ -172,7 +174,13 @@ Then paste one of the prompts from `prompts/`.
 Non-interactive branch review:
 
 ```bash
-codex exec "Review this branch against main. Spawn the code_reviewer subagent, wait for it, and report prioritized findings with file references. Do not edit files."
+codex-reviewer review local --base origin/main --report codex-review/branch-review.md
+```
+
+Non-interactive full repository review:
+
+```bash
+codex-reviewer review local
 ```
 
 Pre-push review command for pre-commit, Husky, or another hook runner:

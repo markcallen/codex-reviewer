@@ -21,3 +21,10 @@ web_search = "cached"
 # one reviewer plus optional security/test/docs specialists later.
 max_threads = 4
 max_depth = 1
+
+[codex_reviewer]
+# Local is the default. Set backend = "k8s" and k8s_api_url when using the
+# Kubernetes-backed review API.
+backend = "local"
+report = "codex-review/full-review.md"
+k8s_api_url = ""

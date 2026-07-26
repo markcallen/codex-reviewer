@@ -66,22 +66,30 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  -e REVIEW_BASE=origin/main \
-  -e REVIEW_REPORT=codex-review/docker-review.md \
   -v "$PWD:/workspace" \
   -w /workspace \
   ghcr.io/<owner>/codex-code-reviewer:v0.1.0 \
-  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
+  codex-reviewer review local
 ```
 
-This reviews against `origin/main` and writes:
+This does a full repository review and writes:
 
 ```text
-codex-review/docker-review.md
+codex-review/full-review.md
 ```
 
-Change `REVIEW_BASE`, `REVIEW_REPORT`, or the image name in the command when you
-need a different base ref, output path, or image tag.
+For a branch review, pass `--base`:
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -e OPENAI_API_KEY \
+  -e GITHUB_TOKEN \
+  -v "$PWD:/workspace" \
+  -w /workspace \
+  ghcr.io/<owner>/codex-code-reviewer:v0.1.0 \
+  codex-reviewer review local --base origin/main --report codex-review/branch-review.md
+```
 
 ## Run App Commands in the Container
 
@@ -89,6 +97,7 @@ Use the same image for CLI commands:
 
 ```bash
 docker run --rm ghcr.io/<owner>/codex-code-reviewer:v0.1.0 codex-reviewer version
+docker run --rm ghcr.io/<owner>/codex-code-reviewer:v0.1.0 codex-reviewer setup --dry-run
 docker run --rm -v "$PWD:/workspace" -w /workspace ghcr.io/<owner>/codex-code-reviewer:v0.1.0 codex-reviewer install --dry-run .
 docker run --rm -v "$PWD:/workspace" -w /workspace ghcr.io/<owner>/codex-code-reviewer:v0.1.0 codex-reviewer doctor .
 ```

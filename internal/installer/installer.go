@@ -57,6 +57,11 @@ type Action struct {
 	Detail string
 }
 
+type GlobalOptions struct {
+	CodexHome string
+	DryRun    bool
+}
+
 func Install(opts Options) (Result, error) {
 	if opts.TargetDir == "" {
 		return Result{}, errors.New("target directory is required")
@@ -93,6 +98,37 @@ func Install(opts Options) (Result, error) {
 		if err := i.installArtifact(a); err != nil {
 			return i.result, err
 		}
+	}
+	sort.SliceStable(i.result.Actions, func(a, b int) bool {
+		return i.result.Actions[a].Path < i.result.Actions[b].Path
+	})
+	return i.result, nil
+}
+
+func InstallGlobal(opts GlobalOptions) (Result, error) {
+	codexHome := opts.CodexHome
+	if codexHome == "" {
+		if env := os.Getenv("CODEX_HOME"); env != "" {
+			codexHome = env
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return Result{}, fmt.Errorf("discover home directory: %w", err)
+			}
+			codexHome = filepath.Join(home, ".codex")
+		}
+	}
+	codexHome, err := filepath.Abs(codexHome)
+	if err != nil {
+		return Result{}, err
+	}
+
+	i := installRun{opts: Options{DryRun: opts.DryRun}, targetDir: codexHome}
+	if err := i.installGlobalAgent(); err != nil {
+		return i.result, err
+	}
+	if err := i.installGlobalConfig(); err != nil {
+		return i.result, err
 	}
 	sort.SliceStable(i.result.Actions, func(a, b int) bool {
 		return i.result.Actions[a].Path < i.result.Actions[b].Path
@@ -142,6 +178,29 @@ func (i *installRun) installConfig() error {
 		return nil
 	}
 	return i.writeTarget(dest, next, "merge", "added review_model and missing [agents] limits")
+}
+
+func (i *installRun) installGlobalAgent() error {
+	return i.installArtifact(artifact{Source: "artifacts/codex/agents/code-reviewer.toml", Dest: "agents/code-reviewer.toml", Merge: mergeNone})
+}
+
+func (i *installRun) installGlobalConfig() error {
+	dest := "config.toml"
+	current, exists, err := i.readTarget(dest)
+	if err != nil {
+		return err
+	}
+	var next []byte
+	if exists {
+		next = mergeGlobalConfig(current)
+		if bytes.Equal(current, next) {
+			i.add("skip", dest, "global Codex reviewer settings already present")
+			return nil
+		}
+		return i.writeTarget(dest, next, "merge", "added missing global Codex reviewer settings")
+	}
+	next = mergeGlobalConfig(nil)
+	return i.writeTarget(dest, next, "create", "installed global Codex reviewer settings")
 }
 
 func defaultReviewerConfig(version string) string {
@@ -317,6 +376,30 @@ func mergeConfig(current []byte) []byte {
 		lines = appendTopLevelKey(lines, `review_model = "gpt-5.5"`)
 	}
 	lines = ensureAgentsKeys(lines)
+	lines = ensureCodexReviewerKeys(lines)
+	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func mergeGlobalConfig(current []byte) []byte {
+	lines := splitLines(string(normalizeNewlines(current)))
+	var topLevelAdditions []string
+	for _, entry := range []struct {
+		key  string
+		line string
+	}{
+		{"model", `model = "gpt-5.5"`},
+		{"model_reasoning_effort", `model_reasoning_effort = "medium"`},
+		{"model_verbosity", `model_verbosity = "medium"`},
+		{"review_model", `review_model = "gpt-5.5"`},
+		{"approval_policy", `approval_policy = "on-request"`},
+	} {
+		if !hasTopLevelKey(lines, entry.key) {
+			topLevelAdditions = append(topLevelAdditions, entry.line)
+		}
+	}
+	lines = appendTopLevelKeys(lines, topLevelAdditions)
+	lines = ensureAgentsKeys(lines)
+	lines = ensureCodexReviewerKeys(lines)
 	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
@@ -335,6 +418,13 @@ func hasTopLevelKey(lines []string, key string) bool {
 }
 
 func appendTopLevelKey(lines []string, line string) []string {
+	return appendTopLevelKeys(lines, []string{line})
+}
+
+func appendTopLevelKeys(lines []string, additions []string) []string {
+	if len(additions) == 0 {
+		return lines
+	}
 	insert := len(lines)
 	for idx, candidate := range lines {
 		if sectionHeaderRE.MatchString(candidate) {
@@ -342,12 +432,12 @@ func appendTopLevelKey(lines []string, line string) []string {
 			break
 		}
 	}
-	next := make([]string, 0, len(lines)+2)
+	next := make([]string, 0, len(lines)+len(additions)+2)
 	next = append(next, lines[:insert]...)
 	if insert > 0 && strings.TrimSpace(next[len(next)-1]) != "" {
 		next = append(next, "")
 	}
-	next = append(next, line)
+	next = append(next, additions...)
 	if insert < len(lines) && strings.TrimSpace(lines[insert]) != "" {
 		next = append(next, "")
 	}
@@ -390,6 +480,49 @@ func ensureAgentsKeys(lines []string) []string {
 	next = append(next, additions...)
 	next = append(next, lines[insert:]...)
 	return next
+}
+
+func ensureCodexReviewerKeys(lines []string) []string {
+	start, end := findSection(lines, "codex_reviewer")
+	if start == -1 {
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+			lines = append(lines, "")
+		}
+		return append(lines,
+			"[codex_reviewer]",
+			`backend = "local"`,
+			`report = "codex-review/full-review.md"`,
+			`k8s_api_url = ""`,
+		)
+	}
+
+	additions := make([]string, 0, 3)
+	if !sectionHasKey(lines[start+1:end], "backend") {
+		additions = append(additions, `backend = "local"`)
+	}
+	if !sectionHasKey(lines[start+1:end], "report") {
+		additions = append(additions, `report = "codex-review/full-review.md"`)
+	}
+	if !sectionHasKey(lines[start+1:end], "k8s_api_url") {
+		additions = append(additions, `k8s_api_url = ""`)
+	}
+	if len(additions) == 0 {
+		return lines
+	}
+	next := make([]string, 0, len(lines)+len(additions))
+	next = append(next, lines[:end]...)
+	next = append(next, additions...)
+	next = append(next, lines[end:]...)
+	return next
+}
+
+func sectionHasKey(lines []string, key string) bool {
+	for _, line := range lines {
+		if keyLineMatches(line, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func findSection(lines []string, name string) (int, int) {

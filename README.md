@@ -1,6 +1,7 @@
-# Codex Code Reviewer Subagent
+# Codex Code Reviewer
 
-A Git-ready Codex configuration template for a read-only code reviewer subagent.
+A local-first Codex code review CLI with a read-only reviewer subagent, Docker
+runtime support, and an optional Kubernetes-backed review service.
 
 The reviewer focuses on:
 
@@ -16,56 +17,88 @@ It avoids style-only comments unless style hides a real bug.
 
 ## Quick start
 
-Install the reviewer for your user account:
+Build the CLI and install the reviewer for your user account:
 
 ```bash
-./scripts/install-global.sh
+make build
+bin/codex-reviewer setup
 ```
 
-When prompted, let the installer update:
+`setup` installs the reviewer agent and updates:
 
 ```text
 ~/.codex/config.toml
 ```
 
-Build the local reviewer container:
+From the repository you want to review, run a full local review:
+
+```bash
+bin/codex-reviewer review local
+```
+
+The report is written to:
+
+```text
+codex-review/full-review.md
+```
+
+For a branch review against `origin/main`:
+
+```bash
+bin/codex-reviewer review local --base origin/main --report codex-review/branch-review.md
+```
+
+To run the same app in an isolated local Docker container, build the image:
 
 ```bash
 make docker-build-runner
 ```
 
-From the repository you want to review, export credentials:
+Then export credentials:
 
 ```bash
 export OPENAI_API_KEY=...
 export GITHUB_TOKEN=...
 ```
 
-Run the review with the local image:
+And run the review with the local image:
 
 ```bash
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  -e REVIEW_BASE=origin/main \
-  -e REVIEW_REPORT=codex-review/docker-review.md \
   -v "$PWD:/workspace" \
   -w /workspace \
   codex-reviewer:phase1 \
-  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
+  codex-reviewer review local
 ```
 
-The report is written to:
+The Docker command also writes:
 
 ```text
-codex-review/docker-review.md
+codex-review/full-review.md
 ```
 
-For an interactive local Codex review in the same repo, open Codex:
+## Manual Codex Session
+
+After running `codex-reviewer setup`, the `code_reviewer` subagent is available
+to normal Codex sessions. From a repository, start Codex:
 
 ```bash
 codex
+```
+
+For a full repository review, paste:
+
+```text
+Do a full code review of this repository. Review the entire codebase, not just the current diff. Use the code_reviewer subagent if available. Focus on correctness, security/privacy risks, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files. Return prioritized findings with file references, severity, why each issue matters, and suggested fixes. If there are no blocking issues, say that clearly and list the main areas checked.
+```
+
+For a branch review, paste:
+
+```text
+Review this branch against origin/main. Use the code_reviewer subagent if available. Inspect the diff and relevant surrounding code. Focus on correctness, security/privacy, regressions, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files. Return prioritized findings with file references and suggested fixes.
 ```
 
 ## Global install
@@ -73,11 +106,24 @@ codex
 To make the reviewer available across repositories:
 
 ```bash
-./scripts/install-global.sh
+codex-reviewer setup
 ```
 
-The script installs the agent, checks `~/.codex/config.toml`, and asks before
-adding any missing reviewer settings.
+The setup command installs the agent and merges missing reviewer settings into
+`~/.codex/config.toml` after showing the planned changes and asking for
+confirmation. Use `codex-reviewer setup --yes` for unattended setup.
+
+The default backend is local:
+
+```toml
+[codex_reviewer]
+backend = "local"
+report = "codex-review/full-review.md"
+k8s_api_url = ""
+```
+
+To use a Kubernetes-backed review API, set `backend = "k8s"` and configure
+`k8s_api_url`, then run `codex-reviewer service submit`.
 
 ## Docker and GHCR
 
@@ -106,12 +152,10 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   -e OPENAI_API_KEY \
   -e GITHUB_TOKEN \
-  -e REVIEW_BASE=origin/main \
-  -e REVIEW_REPORT=codex-review/docker-review.md \
   -v "$PWD:/workspace" \
   -w /workspace \
   "$GHCR_IMAGE:$GHCR_TAG" \
-  sh -lc 'mkdir -p "$(dirname "$REVIEW_REPORT")" && codex exec review --base "$REVIEW_BASE" --output-last-message "$REVIEW_REPORT" "Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files."'
+  codex-reviewer review local
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker commands and options.

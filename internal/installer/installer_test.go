@@ -59,6 +59,8 @@ Do project-specific things.
 	assertContains(t, config, `review_model = "gpt-5.5"`)
 	assertContains(t, config, `max_threads = 2`)
 	assertContains(t, config, `max_depth = 1`)
+	assertContains(t, config, `[codex_reviewer]`)
+	assertContains(t, config, `backend = "local"`)
 	if strings.Count(config, "[agents]") != 1 {
 		t.Fatalf("config should contain one [agents] table, got:\n%s", config)
 	}
@@ -116,6 +118,75 @@ func TestInstallDryRunDoesNotWrite(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".codex")); !os.IsNotExist(err) {
 		t.Fatalf("dry run should not create .codex, stat err = %v", err)
+	}
+}
+
+func TestInstallGlobalCreatesCodexHome(t *testing.T) {
+	dir := t.TempDir()
+
+	result, err := InstallGlobal(GlobalOptions{CodexHome: dir})
+	if err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	requireFileContains(t, dir, "agents/code-reviewer.toml", `name = "code_reviewer"`)
+	config := readFile(t, dir, "config.toml")
+	assertContains(t, config, `model = "gpt-5.5"`)
+	assertContains(t, config, `review_model = "gpt-5.5"`)
+	assertContains(t, config, `[agents]`)
+	assertContains(t, config, `max_threads = 4`)
+	assertContains(t, config, `[codex_reviewer]`)
+	assertContains(t, config, `backend = "local"`)
+	assertContains(t, config, `k8s_api_url = ""`)
+
+	if len(result.Actions) == 0 {
+		t.Fatal("InstallGlobal() returned no actions")
+	}
+}
+
+func TestInstallGlobalMergesExistingConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "config.toml", `model = "gpt-5"
+
+[agents]
+max_threads = 2
+
+[codex_reviewer]
+backend = "k8s"
+k8s_api_url = "http://localhost:8080"
+`)
+
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	config := readFile(t, dir, "config.toml")
+	assertContains(t, config, `model = "gpt-5"`)
+	assertContains(t, config, `review_model = "gpt-5.5"`)
+	assertContains(t, config, `max_threads = 2`)
+	assertContains(t, config, `max_depth = 1`)
+	assertContains(t, config, `backend = "k8s"`)
+	assertContains(t, config, `k8s_api_url = "http://localhost:8080"`)
+	assertContains(t, config, `report = "codex-review/full-review.md"`)
+	if strings.Count(config, "[agents]") != 1 {
+		t.Fatalf("config should contain one [agents] table, got:\n%s", config)
+	}
+	if strings.Count(config, "[codex_reviewer]") != 1 {
+		t.Fatalf("config should contain one [codex_reviewer] table, got:\n%s", config)
+	}
+}
+
+func TestInstallGlobalDryRunDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	result, err := InstallGlobal(GlobalOptions{CodexHome: dir, DryRun: true})
+	if err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+	if len(result.Actions) == 0 {
+		t.Fatal("dry run returned no planned actions")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("dry run should not create config.toml, stat err = %v", err)
 	}
 }
 
