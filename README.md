@@ -1,5 +1,12 @@
 # Codex Code Reviewer
 
+[![CI](https://github.com/markcallen/codex-reviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/ci.yml)
+[![Smoke](https://github.com/markcallen/codex-reviewer/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/smoke.yml)
+[![Release](https://github.com/markcallen/codex-reviewer/actions/workflows/publish-cli.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/publish-cli.yml)
+[![Docker](https://github.com/markcallen/codex-reviewer/actions/workflows/publish-docker.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/publish-docker.yml)
+[![License](https://img.shields.io/github/license/markcallen/codex-reviewer)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/markcallen/codex-reviewer)](https://github.com/markcallen/codex-reviewer/releases)
+
 A local-first Codex code review CLI with a read-only reviewer subagent, Docker
 runtime support, and an optional Kubernetes-backed review service.
 
@@ -282,3 +289,7 @@ That makes Codex's built-in `/review` command use the same high-capability model
 ## Customize severity rules
 
 Edit `docs/code_review.md` and `AGENTS.md` for your team's standards. Keep the reviewer strict about P0/P1 issues and forgiving about nits. That balance keeps reviews useful instead of noisy.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

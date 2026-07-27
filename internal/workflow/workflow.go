@@ -80,7 +80,7 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	for _, step := range steps {
-		fmt.Fprintf(opts.Stdout, "==> %s\n%s\n", step.Name, step.Command)
+		_, _ = fmt.Fprintf(opts.Stdout, "==> %s\n%s\n", step.Name, step.Command)
 		if opts.DryRun {
 			continue
 		}

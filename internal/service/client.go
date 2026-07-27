@@ -33,7 +33,7 @@ func (c Client) Report(ctx context.Context, reportURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func (c Client) Submit(ctx context.Context, req ReviewRequest) (ReviewResponse, 
 	if err != nil {
 		return ReviewResponse{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var review ReviewResponse
 	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
 		return ReviewResponse{}, err

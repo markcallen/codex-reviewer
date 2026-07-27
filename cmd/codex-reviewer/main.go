@@ -19,6 +19,7 @@ import (
 )
 
 var version = "dev"
+var listenAndServe = http.ListenAndServe
 
 func main() {
 	if len(os.Args) < 2 {
@@ -81,7 +82,7 @@ func runWorkflowRun(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer workflow run [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -138,7 +139,7 @@ func runServiceAPI(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service api [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -149,7 +150,7 @@ func runServiceAPI(args []string) {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stdout, "codex-reviewer: listening on %s\n", listen)
-	if err := http.ListenAndServe(listen, server.Handler()); err != nil {
+	if err := listenAndServe(listen, server.Handler()); err != nil {
 		fmt.Fprintf(os.Stderr, "service api failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -161,7 +162,7 @@ func runServiceRunner(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service runner\n\n")
 		fmt.Fprintf(fs.Output(), "Reads REVIEW_REQUEST_JSON, REVIEW_ID, REVIEW_WORKSPACE, and REVIEW_OUTPUT_DIR from the environment.\n")
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -215,7 +216,7 @@ func runServiceJobManifest(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service job-manifest [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -272,7 +273,7 @@ func runServiceSubmit(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service submit [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -368,7 +369,7 @@ func runReviewLocal(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review local [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -395,7 +396,7 @@ func runReviewPrePush(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review pre-push [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -421,7 +422,7 @@ func runInstall(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer install [flags] /path/to/project\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 
 	if fs.NArg() != 1 {
 		fs.Usage()
@@ -466,7 +467,7 @@ func runSetup(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer setup [flags]\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
 		os.Exit(2)
@@ -556,7 +557,7 @@ func runDoctor(args []string) {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer doctor [flags] /path/to/project\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args)
 
 	if fs.NArg() != 1 {
 		fs.Usage()

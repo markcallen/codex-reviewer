@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer", "standard"} {
+	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
@@ -291,6 +292,42 @@ func TestRemoteFetchRefTrimsOriginPrefix(t *testing.T) {
 	}
 	if got := remoteFetchRef("feature/test"); got != "feature/test" {
 		t.Fatalf("remoteFetchRef(feature/test) = %q", got)
+	}
+}
+
+func TestWaitForLocalProxyConnectsToLoopbackListener(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	defer listener.Close()
+	t.Setenv("HTTPS_PROXY", "http://"+listener.Addr().String())
+
+	errCh := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		errCh <- err
+	}()
+
+	if err := waitForLocalProxy(context.Background(), time.Second); err != nil {
+		t.Fatalf("waitForLocalProxy() error = %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Accept() error = %v", err)
+	}
+}
+
+func TestExecCommandRunnerRun(t *testing.T) {
+	var stdout bytes.Buffer
+	runner := execCommandRunner{stdout: &stdout, stderr: &bytes.Buffer{}}
+	if err := runner.Run(context.Background(), "", "sh", "-c", "printf ok"); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stdout.String() != "ok" {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 

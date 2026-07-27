@@ -1,0 +1,29 @@
+{
+  "targets": [
+    "codex",
+    "claude"
+  ],
+  "agents": [
+    "local-dev",
+    "docs",
+    "cicd",
+    "observability",
+    "publishing",
+    "git-hooks",
+    "tasks",
+    "linting",
+    "logging",
+    "testing"
+  ],
+  "ballastVersion": "5.12.0",
+  "languages": [
+    "go"
+  ],
+  "paths": {
+    "go": [
+      "."
+    ]
+  },
+  "taskSystem": "github",
+  "deploymentModel": "none"
+}

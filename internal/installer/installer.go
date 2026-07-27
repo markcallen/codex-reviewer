@@ -348,7 +348,7 @@ func appendManagedBlock(current []byte, id, block string) []byte {
 	b.WriteString("\n")
 	b.WriteString(strings.TrimRight(block, "\n"))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("<!-- END %s: %s -->", reviewBlockMarker, id))
+	fmt.Fprintf(&b, "<!-- END %s: %s -->", reviewBlockMarker, id)
 	b.WriteString("\n")
 	return []byte(b.String())
 }

@@ -46,17 +46,17 @@ func RunLocal(ctx context.Context, opts LocalOptions) error {
 	}
 
 	args := localReviewArgs(opts, reportPath)
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: running local review\n")
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: report path %s\n", reportPath)
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: running local review\n")
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: report path %s\n", reportPath)
 	if opts.DryRun {
-		fmt.Fprintf(opts.Stdout, "codex-reviewer: dry run: codex %s\n", strings.Join(args, " "))
+		_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: dry run: codex %s\n", strings.Join(args, " "))
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(reportPath), 0o755); err != nil {
 		return fmt.Errorf("create review report directory: %w", err)
 	}
 	if _, err := os.Stat(reportPath); err == nil {
-		fmt.Fprintf(opts.Stdout, "codex-reviewer: existing report will be overwritten: %s\n", reportPath)
+		_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: existing report will be overwritten: %s\n", reportPath)
 	} else if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("check review report path: %w", err)
 	}
@@ -67,18 +67,19 @@ func RunLocal(ctx context.Context, opts LocalOptions) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("run codex review: %w", err)
 	}
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: review complete\n")
-	fmt.Fprintf(opts.Stdout, "codex-reviewer: wrote review report to %s\n", reportPath)
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: review complete\n")
+	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: wrote review report to %s\n", reportPath)
 	return nil
 }
 
 func localReviewArgs(opts LocalOptions, reportPath string) []string {
 	instructions := strings.TrimSpace(opts.Instructions)
 	if opts.Base != "" && !opts.Full {
-		if instructions == "" {
-			instructions = "Focus on correctness, security/privacy, regressions, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files."
+		args := []string{"exec", "review", "--base", opts.Base, "--output-last-message", reportPath}
+		if instructions != "" {
+			args = append(args, instructions)
 		}
-		return []string{"exec", "review", "--base", opts.Base, "--output-last-message", reportPath, instructions}
+		return args
 	}
 	prompt := instructions
 	if prompt == "" {

@@ -69,14 +69,24 @@ func NewAPIServer(opts APIOptions) (*APIServer, error) {
 
 func (s *APIServer) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("POST /reviews", s.handleCreateReview)
 	mux.HandleFunc("GET /reviews/{id}", s.handleGetReview)
 	mux.HandleFunc("GET /reviews/{id}/report", s.handleGetReport)
 	return mux
 }
 
+func (s *APIServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) handleReady(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
 func (s *APIServer) handleCreateReview(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	var req ReviewRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ReviewResponse{Status: "rejected", Error: "decode request: " + err.Error()})

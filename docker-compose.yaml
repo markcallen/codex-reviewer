@@ -1,0 +1,7 @@
+services:
+  reviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    image: codex-reviewer:smoke
+    command: ["codex-reviewer", "version"]

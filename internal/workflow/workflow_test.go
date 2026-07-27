@@ -86,10 +86,26 @@ func TestRunStopsOnFailure(t *testing.T) {
 	}
 }
 
+func TestShellRunnerRun(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := (shellRunner{}).Run(context.Background(), "printf ok", &stdout, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stdout.String() != "ok" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 	got := shellQuote("don't break")
 	if got != `'don'\''t break'` {
 		t.Fatalf("shellQuote() = %q", got)
+	}
+}
+
+func TestShellQuoteEmpty(t *testing.T) {
+	if got := shellQuote(""); got != "''" {
+		t.Fatalf("shellQuote(\"\") = %q", got)
 	}
 }
 
