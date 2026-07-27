@@ -1,0 +1,78 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Semantic version bump
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump_and_tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - id: previous_tag
+        uses: WyriHaximus/github-action-get-previous-tag@v2
+        with:
+          fallback: v0.0.0
+
+      - id: semvers
+        uses: WyriHaximus/github-action-next-semvers@v1
+        with:
+          version: ${{ steps.previous_tag.outputs.tag }}
+
+      - id: next
+        run: |
+          case "${{ inputs.release_type }}" in
+            patch) version="${{ steps.semvers.outputs.patch }}" ;;
+            minor) version="${{ steps.semvers.outputs.minor }}" ;;
+            major) version="${{ steps.semvers.outputs.major }}" ;;
+            *) echo "unsupported release_type=${{ inputs.release_type }}" >&2; exit 1 ;;
+          esac
+          echo "tag=v${version#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.next.outputs.tag }}"
+          git push origin "${{ steps.next.outputs.tag }}"
+
+  publish_cli:
+    needs: bump_and_tag
+    uses: ./.github/workflows/publish-cli.yml
+    with:
+      tag: ${{ needs.bump_and_tag.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: write
+
+  publish_docker:
+    needs: bump_and_tag
+    uses: ./.github/workflows/publish-docker.yml
+    with:
+      tag: ${{ needs.bump_and_tag.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
