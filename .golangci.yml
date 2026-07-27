@@ -12,5 +12,3 @@ linters:
     - staticcheck
     - unused
 
-issues:
-  exclude-use-default: false
