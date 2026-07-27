@@ -71,6 +71,15 @@ check_golangci_lint() {
   print_check golangci-lint "$found" installed OK
 }
 
+check_actionlint() {
+  if ! command -v actionlint >/dev/null 2>&1; then
+    missing actionlint installed
+    return
+  fi
+  found="$(actionlint -version 2>/dev/null | head -1)"
+  print_check actionlint "$found" installed OK
+}
+
 check_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     missing docker installed
@@ -119,6 +128,7 @@ check_gh() {
 check_go
 check_gofmt
 check_golangci_lint
+check_actionlint
 check_docker
 check_kind
 check_kubectl

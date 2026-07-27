@@ -35,3 +35,17 @@ jobs:
 
       - name: Test with coverage gate
         run: make coverage-check COVERAGE_THRESHOLD=75.0
+
+  smoke:
+    needs: build_lint_test
+    uses: ./.github/workflows/smoke.yml
+    permissions:
+      contents: read
+
+  publish_docker:
+    needs: smoke
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/publish-docker.yml
+    permissions:
+      contents: read
+      packages: write
