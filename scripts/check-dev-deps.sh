@@ -68,7 +68,7 @@ check_golangci_lint() {
     return
   fi
   found="$(golangci-lint version | awk '{print $4}')"
-  print_check golangci "$found" installed OK
+  print_check golangci-lint "$found" installed OK
 }
 
 check_docker() {

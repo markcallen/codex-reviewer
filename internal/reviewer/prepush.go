@@ -133,7 +133,7 @@ func loadConfig(path string) (prePushConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return prePushConfig{}, fmt.Errorf("%s is missing; run codex-reviewer install", ConfigFile)
+			return prePushConfig{}, fmt.Errorf("%s is missing; run codex-reviewer install ./", ConfigFile)
 		}
 		return prePushConfig{}, fmt.Errorf("read %s: %w", ConfigFile, err)
 	}

@@ -140,3 +140,4 @@ install_with_package_manager docker docker docker.io
 install_with_package_manager gh gh gh
 install_with_package_manager pre-commit pre-commit pre-commit
 pre-commit install --install-hooks
+pre-commit install --hook-type pre-push --install-hooks
