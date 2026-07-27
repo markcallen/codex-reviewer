@@ -66,3 +66,13 @@ jobs:
     secrets: inherit
     permissions:
       contents: write
+
+  publish_docker:
+    needs: bump_and_tag
+    uses: ./.github/workflows/publish-docker.yml
+    with:
+      tag: ${{ needs.bump_and_tag.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
