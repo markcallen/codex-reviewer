@@ -5,7 +5,7 @@ COPY go.mod ./
 COPY . .
 RUN go build -ldflags "-X main.version=${VERSION:-dev}" -o /out/codex-reviewer ./cmd/codex-reviewer
 
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git openssh-client ripgrep \
