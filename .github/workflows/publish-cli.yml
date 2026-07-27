@@ -39,7 +39,7 @@ jobs:
           make lint
           make coverage-check COVERAGE_THRESHOLD=75.0
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: latest
