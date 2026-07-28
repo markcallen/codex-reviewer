@@ -26,11 +26,18 @@ run_capture() {
   "$@" 2>&1
 }
 
-version_output="$(run_capture "$BIN" version)"
+run_checked() {
+  if ! output="$(run_capture "$@")"; then
+    fail "$* failed: $output"
+  fi
+  printf '%s' "$output"
+}
+
+version_output="$(run_checked "$BIN" version)"
 [ -n "$version_output" ] || fail "$BIN version produced no output"
 printf 'PASS: version output: %s\n' "$version_output"
 
-setup_output="$(run_capture "$BIN" setup --dry-run)"
+setup_output="$(run_checked "$BIN" setup --dry-run)"
 contains "$setup_output" "Dry run complete."
 printf 'PASS: setup dry-run completed\n'
 
@@ -42,17 +49,17 @@ mkdir -p "$PROJECT"
   printf '%s\n' '# Smoke project' > README.md
 )
 
-install_output="$(run_capture "$BIN" install "$PROJECT")"
+install_output="$(run_checked "$BIN" install "$PROJECT")"
 contains "$install_output" "Install complete."
 printf 'PASS: install completed\n'
 
-doctor_output="$(run_capture "$BIN" doctor "$PROJECT")"
+doctor_output="$(run_checked "$BIN" doctor "$PROJECT")"
 contains "$doctor_output" "Codex reviewer setup looks good."
 printf 'PASS: doctor completed\n'
 
 local_review_output="$(
   cd "$PROJECT"
-  run_capture "$BIN" review local --dry-run --base origin/main --report codex-review/smoke.md
+  run_checked "$BIN" review local --dry-run --base origin/main --report codex-review/smoke.md
 )"
 contains "$local_review_output" "codex-reviewer: dry run: codex exec review --base origin/main"
 contains "$local_review_output" "--output-last-message"
@@ -60,7 +67,7 @@ printf 'PASS: local review dry-run completed\n'
 
 submit_output="$(
   cd "$PROJECT"
-  run_capture "$BIN" service submit \
+  run_checked "$BIN" service submit \
     --dry-run \
     --repo-url https://github.com/octocat/Hello-World \
     --base origin/main \
@@ -74,7 +81,7 @@ printf 'PASS: service submit dry-run completed\n'
 
 manifest_output="$(
   cd "$PROJECT"
-  run_capture "$BIN" service job-manifest \
+  run_checked "$BIN" service job-manifest \
     --repo-url https://github.com/octocat/Hello-World \
     --base origin/main \
     --head main \
