@@ -214,6 +214,34 @@ func TestRunReviewDockerDryRun(t *testing.T) {
 	})
 }
 
+func TestDefaultReviewReportUsesBranchReportForBaseReview(t *testing.T) {
+	got := defaultReviewReport("", "codex-review/full-review.md", "origin/main", false)
+	if got != "codex-review/branch-review.md" {
+		t.Fatalf("defaultReviewReport() = %q, want branch report", got)
+	}
+}
+
+func TestDefaultReviewReportKeepsFullReportForFullReview(t *testing.T) {
+	got := defaultReviewReport("", "codex-review/full-review.md", "origin/main", true)
+	if got != "codex-review/full-review.md" {
+		t.Fatalf("defaultReviewReport() = %q, want full report", got)
+	}
+}
+
+func TestDefaultReviewReportKeepsExplicitReport(t *testing.T) {
+	got := defaultReviewReport("codex-review/custom.md", "codex-review/full-review.md", "origin/main", false)
+	if got != "codex-review/custom.md" {
+		t.Fatalf("defaultReviewReport() = %q, want explicit report", got)
+	}
+}
+
+func TestDefaultReviewReportKeepsCustomConfigReport(t *testing.T) {
+	got := defaultReviewReport("", "codex-review/custom.md", "origin/main", false)
+	if got != "codex-review/custom.md" {
+		t.Fatalf("defaultReviewReport() = %q, want custom config report", got)
+	}
+}
+
 func TestRunReviewDockerWithFakeDocker(t *testing.T) {
 	dir := initTestGitRepo(t)
 	t.Chdir(dir)

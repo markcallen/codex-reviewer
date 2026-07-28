@@ -52,8 +52,12 @@ codex-review/full-review.md
 For a branch review against `origin/main`:
 
 ```bash
-bin/codex-reviewer review local --base origin/main --report codex-review/branch-review.md
+bin/codex-reviewer review local --base origin/main
 ```
+
+Branch reviews default to `codex-review/branch-review.md` and require a concise
+auditable report with a verdict, diff summary, areas checked, limits, findings,
+and tests to run.
 
 For a large or risky branch, require a structured report with subsystem
 coverage and explicit review limits:
@@ -61,8 +65,7 @@ coverage and explicit review limits:
 ```bash
 bin/codex-reviewer review local \
   --base origin/main \
-  --structured \
-  --report codex-review/branch-review.md
+  --structured
 ```
 
 Structured review mode asks Codex to summarize the diff, list areas checked,

@@ -112,6 +112,7 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 	}
 
 	cmd := exec.CommandContext(ctx, "codex", args...)
+	configureReviewCommand(cmd)
 	cmd.Dir = repoRoot
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr

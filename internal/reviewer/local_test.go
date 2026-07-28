@@ -27,10 +27,21 @@ func TestLocalReviewArgsFullReviewByDefault(t *testing.T) {
 func TestLocalReviewArgsDiffReviewWithBase(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main"}, "codex-review/branch-review.md")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--output-last-message codex-review/branch-review.md"} {
+	for _, want := range []string{
+		"exec --output-last-message codex-review/branch-review.md",
+		"Review this branch against origin/main.",
+		"git diff origin/main...HEAD",
+		"Diff summary",
+		"Areas checked",
+		"Areas not checked / limits",
+		"Tests to run",
+	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
+	}
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("base review should use prompt path for auditable output: %v", args)
 	}
 }
 
@@ -135,8 +146,11 @@ func TestRunLocalDryRun(t *testing.T) {
 		t.Fatalf("RunLocal() error = %v", err)
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "codex-reviewer: dry run: codex exec review --base origin/main") {
+	if !strings.Contains(out, "codex-reviewer: dry run: codex exec --output-last-message") {
 		t.Fatalf("dry-run output missing command:\n%s", out)
+	}
+	if !strings.Contains(out, "Areas checked") {
+		t.Fatalf("dry-run output missing base review prompt:\n%s", out)
 	}
 }
 
@@ -170,7 +184,7 @@ exit 1
 	if got := readLocalFile(t, filepath.Join(dir, "codex-review/test.md")); got != "No blocking findings\n" {
 		t.Fatalf("report = %q", got)
 	}
-	if got := readLocalFile(t, logPath); !strings.Contains(got, "exec review --base origin/main") {
+	if got := readLocalFile(t, logPath); !strings.Contains(got, "Review this branch against origin/main") {
 		t.Fatalf("codex args = %q", got)
 	}
 }

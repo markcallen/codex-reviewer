@@ -62,6 +62,7 @@ func RunLocal(ctx context.Context, opts LocalOptions) error {
 		return fmt.Errorf("check review report path: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, "codex", args...)
+	configureReviewCommand(cmd)
 	cmd.Dir = repoRoot
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
@@ -81,9 +82,6 @@ func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 	instructions := reviewInstructions(opts)
 	baseArgs := []string{"exec"}
 	if opts.Base != "" && !opts.Full {
-		if instructions == "" {
-			return append(baseArgs, "review", "--base", opts.Base, "--output-last-message", reportPath)
-		}
 		return append(baseArgs, "--output-last-message", reportPath, branchReviewPrompt(opts.Base, instructions))
 	}
 	prompt := instructions
@@ -94,7 +92,30 @@ func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 }
 
 func branchReviewPrompt(base, instructions string) string {
+	if strings.TrimSpace(instructions) == "" {
+		return defaultBranchReviewPrompt(base)
+	}
 	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `git diff %s...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n\n%s", base, base, instructions)
+}
+
+func defaultBranchReviewPrompt(base string) string {
+	return fmt.Sprintf(`Review this branch against %s.
+
+Review scope:
+- Inspect the diff with git diff %s...HEAD and read relevant surrounding code before writing findings.
+- Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, concurrency, error handling, tests, CI/build behavior, and documentation required by user-visible changes.
+- Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
+- Do not edit files; write only the review report.
+
+Required report format:
+1. Start with exactly one verdict line: "Block", "Approve with fixes", or "No blocking findings".
+2. Add "Diff summary" with the base/ref reviewed and the major subsystems touched.
+3. Add "Areas checked" with concise bullets for the touched subsystems and risk classes checked.
+4. Add "Areas not checked / limits" for any subsystem, dependency surface, test path, or runtime behavior not deeply verified.
+5. Add "Findings" in priority order. If there are no findings, say "None".
+6. Add "Tests to run" with the smallest useful validation commands.
+
+Report concrete P0, P1, and P2 issues. Do not invent speculative issues without an execution path.`, base, base)
 }
 
 func reviewInstructions(opts LocalOptions) string {
