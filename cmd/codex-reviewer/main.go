@@ -345,6 +345,8 @@ func runReview(args []string) {
 	switch args[0] {
 	case "local":
 		runReviewLocal(args[1:])
+	case "docker":
+		runReviewDocker(args[1:])
 	case "pre-push":
 		runReviewPrePush(args[1:])
 	case "-h", "--help", "help":
@@ -356,6 +358,67 @@ func runReview(args []string) {
 	}
 }
 
+func runReviewDocker(args []string) {
+	cfg := codexconfig.LoadReviewerConfig()
+	var opts reviewer.DockerOptions
+	defaultImage := defaultDockerImageForVersion(version)
+	fs := flag.NewFlagSet("review docker", flag.ExitOnError)
+	fs.StringVar(&opts.Image, "image", defaultImage, "review runner image")
+	fs.StringVar(&opts.Pull, "pull", "missing", "Docker pull policy: always, missing, or never")
+	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
+	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
+	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the docker command without running it")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review docker [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Dir = "."
+	opts.Stdout = os.Stdout
+	opts.Stderr = os.Stderr
+	if err := reviewer.RunDocker(context.Background(), opts); err != nil {
+		fmt.Fprintf(os.Stderr, "docker review failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func defaultDockerImageForVersion(version string) string {
+	tag := dockerTagForVersion(version)
+	return reviewer.DefaultDockerRepository + ":" + tag
+}
+
+func dockerTagForVersion(version string) string {
+	tag := strings.TrimSpace(version)
+	if tag == "" || tag == "dev" {
+		return "latest"
+	}
+	tag = strings.TrimSuffix(tag, "-dirty")
+	parts := strings.Split(tag, "-")
+	if len(parts) >= 3 && isDecimal(parts[len(parts)-2]) && strings.HasPrefix(parts[len(parts)-1], "g") {
+		return strings.Join(parts[:len(parts)-2], "-")
+	}
+	return tag
+}
+
+func isDecimal(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func runReviewLocal(args []string) {
 	cfg := codexconfig.LoadReviewerConfig()
 	var opts reviewer.LocalOptions
@@ -364,6 +427,7 @@ func runReviewLocal(args []string) {
 	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
+	fs.BoolVar(&opts.BypassSandbox, "bypass-codex-sandbox", false, "disable Codex command sandboxing; intended for externally sandboxed container runs")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex command without running it")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review local [flags]\n\n")
@@ -627,6 +691,7 @@ Usage:
   codex-reviewer install [flags] /path/to/project
   codex-reviewer doctor [flags] /path/to/project
   codex-reviewer review local [flags]
+  codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
@@ -643,6 +708,7 @@ func reviewUsage() {
 
 Usage:
   codex-reviewer review local [flags]
+  codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
 
 `)

@@ -193,6 +193,72 @@ func TestRunReviewLocalDryRun(t *testing.T) {
 	})
 }
 
+func TestRunReviewDockerDryRun(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+
+	runReviewDocker([]string{
+		"--dry-run",
+		"--image", "reviewer:test",
+		"--pull", "never",
+		"--base", "origin/main",
+		"--report", "codex-review/test.md",
+	})
+	runReview([]string{
+		"docker",
+		"--dry-run",
+		"--image", "reviewer:test",
+		"--pull", "never",
+		"--base", "origin/main",
+		"--report", "codex-review/wrapper.md",
+	})
+}
+
+func TestRunReviewDockerWithFakeDocker(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+	binDir := t.TempDir()
+	argsFile := filepath.Join(t.TempDir(), "docker-args.txt")
+	writeExecutable(t, filepath.Join(binDir, "docker"), `#!/bin/sh
+printf '%s\n' "$@" > "$DOCKER_ARGS_FILE"
+printf 'CODEX_API_KEY=%s\nGITHUB_TOKEN=%s\n' "$CODEX_API_KEY" "$GITHUB_TOKEN" >> "$DOCKER_ARGS_FILE"
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DOCKER_ARGS_FILE", argsFile)
+	t.Setenv("CODEX_API_KEY", "test-codex-key")
+	t.Setenv("GITHUB_TOKEN", "test-github-token")
+
+	runReviewDocker([]string{
+		"--image", "reviewer:test",
+		"--pull", "never",
+		"--base", "origin/main",
+		"--report", "codex-review/test.md",
+		"--instructions", "focus on docker",
+	})
+
+	got := readFile(t, argsFile)
+	for _, want := range []string{
+		"run\n",
+		"--pull\nnever\n",
+		"-e\nCODEX_API_KEY\n",
+		"-e\nGITHUB_TOKEN\n",
+		"-v\n" + dir + ":/workspace\n",
+		"reviewer:test\n",
+		"codex\nexec\n",
+		"--sandbox\ndanger-full-access\n",
+		"review\n",
+		"--base\norigin/main\n",
+		"--output-last-message\ncodex-review/test.md\n",
+		"focus on docker\n",
+		"CODEX_API_KEY=test-codex-key\n",
+		"GITHUB_TOKEN=test-github-token\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("docker args missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunReviewPrePushDryRun(t *testing.T) {
 	dir := initTestGitRepo(t)
 	t.Chdir(dir)
@@ -231,6 +297,21 @@ func TestPrintHelpersAndPredicates(t *testing.T) {
 	}
 	if got := firstNonEmpty("", "fallback"); got != "fallback" {
 		t.Fatalf("firstNonEmpty() = %q", got)
+	}
+	if got := defaultDockerImageForVersion("v1.2.3"); got != "ghcr.io/markcallen/codex-reviewer:v1.2.3" {
+		t.Fatalf("defaultDockerImageForVersion(v1.2.3) = %q", got)
+	}
+	if got := defaultDockerImageForVersion("v1.2.3-4-gabc1234-dirty"); got != "ghcr.io/markcallen/codex-reviewer:v1.2.3" {
+		t.Fatalf("defaultDockerImageForVersion(describe dirty) = %q", got)
+	}
+	if got := defaultDockerImageForVersion("v1.2.3-rc.1"); got != "ghcr.io/markcallen/codex-reviewer:v1.2.3-rc.1" {
+		t.Fatalf("defaultDockerImageForVersion(prerelease) = %q", got)
+	}
+	if got := defaultDockerImageForVersion("v1.2.3-dirty"); got != "ghcr.io/markcallen/codex-reviewer:v1.2.3" {
+		t.Fatalf("defaultDockerImageForVersion(exact dirty) = %q", got)
+	}
+	if got := defaultDockerImageForVersion("dev"); got != "ghcr.io/markcallen/codex-reviewer:latest" {
+		t.Fatalf("defaultDockerImageForVersion(dev) = %q", got)
 	}
 	printWarnings([]string{"be careful"})
 	usage()
