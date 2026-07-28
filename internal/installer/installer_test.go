@@ -202,6 +202,50 @@ func TestInstallGlobalAddsVersionToOldGeneratedAgent(t *testing.T) {
 	requireFileContains(t, dir, "agents/code-reviewer.toml", `# codex-reviewer-version = "v2.0.0"`)
 }
 
+func TestInstallGlobalCustomAgentGetsVersionMarker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	custom := "# custom user-edited agent\nsome custom content\n"
+	if err := os.WriteFile(filepath.Join(dir, "agents/code-reviewer.toml"), []byte(custom), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v3.0.0"}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	if err := CheckGlobalAgentVersion(dir, "v3.0.0"); err != nil {
+		t.Fatalf("CheckGlobalAgentVersion() after custom agent install = %v, want nil", err)
+	}
+	requireFileContains(t, dir, "agents/code-reviewer.toml", "some custom content")
+	requireFileContains(t, dir, "agents/code-reviewer.toml", `# codex-reviewer-version = "v3.0.0"`)
+}
+
+func TestInstallGlobalUpdatesMarkerAfterLeadingBlanks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	custom := "\n\n# codex-reviewer-version = \"v1.0.0\"\n# custom user-edited agent\nsome custom content\n"
+	if err := os.WriteFile(filepath.Join(dir, "agents/code-reviewer.toml"), []byte(custom), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v3.0.0"}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	agent := readFile(t, dir, "agents/code-reviewer.toml")
+	if strings.Count(agent, globalAgentVersionPrefix) != 1 {
+		t.Fatalf("global agent should have exactly one version marker:\n%s", agent)
+	}
+	assertContains(t, agent, `# codex-reviewer-version = "v3.0.0"`)
+	assertContains(t, agent, "# custom user-edited agent")
+	assertContains(t, agent, "some custom content")
+}
+
 func TestCheckGlobalAgentVersion(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v1.2.3"}); err != nil {
@@ -239,8 +283,54 @@ exit 0
 	}
 	log := string(mustReadFile(t, logPath))
 	assertContains(t, log, "--strict-config")
-	assertContains(t, log, "--help")
+	assertContains(t, log, "doctor")
+	assertContains(t, log, "--summary")
 	assertContains(t, log, "CODEX_HOME="+dir)
+}
+
+func TestValidateGlobalCodexConfigReplacesExistingCODEXHOME(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex.log")
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte(`#!/bin/sh
+env | grep '^CODEX_HOME=' > "`+logPath+`"
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "wrong-home"))
+
+	if err := ValidateGlobalCodexConfig(dir); err != nil {
+		t.Fatalf("ValidateGlobalCodexConfig() error = %v", err)
+	}
+	log := string(mustReadFile(t, logPath))
+	if strings.Count(log, "CODEX_HOME=") != 1 {
+		t.Fatalf("expected exactly one CODEX_HOME entry, got:\n%s", log)
+	}
+	assertContains(t, log, "CODEX_HOME="+dir)
+}
+
+func TestValidateGlobalCodexConfigReportsFailure(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte(`#!/bin/sh
+printf 'config load failed\n'
+printf 'bad config\n' >&2
+exit 7
+`), 0o755); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := ValidateGlobalCodexConfig(dir)
+	if err == nil {
+		t.Fatal("ValidateGlobalCodexConfig() error = nil")
+	}
+	assertContains(t, err.Error(), "config load failed")
+	assertContains(t, err.Error(), "bad config")
 }
 
 func TestInstallGlobalMergesExistingConfig(t *testing.T) {

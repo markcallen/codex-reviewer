@@ -94,7 +94,7 @@ func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 }
 
 func branchReviewPrompt(base, instructions string) string {
-	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `git diff %s...HEAD` and read relevant surrounding code before writing the report.\n\n%s", base, base, instructions)
+	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `git diff %s...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n\n%s", base, base, instructions)
 }
 
 func reviewInstructions(opts LocalOptions) string {
@@ -115,6 +115,7 @@ Review scope:
 - Read relevant surrounding code for each high-risk subsystem instead of only isolated diff hunks.
 - Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, persistence/migration risk, concurrency, error handling, tests, CI/build behavior, deployment/runtime behavior, and documentation required by user-visible changes.
 - Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
+- Do not edit files; write only the review report.
 
 Required report format:
 1. Start with exactly one verdict line: "Block", "Approve with fixes", or "No blocking findings".

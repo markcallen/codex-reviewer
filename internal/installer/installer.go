@@ -212,9 +212,9 @@ func (i *installRun) installGlobalAgent() error {
 	if bytes.Equal(removeGlobalAgentVersion(current), normalizeNewlines(bundled)) {
 		return i.writeTarget(dest, versioned, "merge", "updated global reviewer agent version")
 	}
-	i.add("keep", dest, "existing file differs; left unchanged")
-	i.result.Warnings = append(i.result.Warnings, fmt.Sprintf("%s already exists and differs from the bundled artifact", dest))
-	return nil
+	versioned = addGlobalAgentVersion(current, i.opts.Version)
+	i.result.Warnings = append(i.result.Warnings, fmt.Sprintf("%s differs from the bundled artifact; updated version marker only, body left unchanged", dest))
+	return i.writeTarget(dest, versioned, "merge", "updated version marker on custom global reviewer agent")
 }
 
 func (i *installRun) installGlobalConfig() error {
@@ -375,18 +375,41 @@ func ValidateGlobalCodexConfig(codexHome string) error {
 			codexHome = filepath.Join(home, ".codex")
 		}
 	}
-	cmd := exec.Command("codex", "--strict-config", "--help")
-	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome)
+	cmd := exec.Command("codex", "--strict-config", "doctor", "--summary", "--no-color", "--ascii")
+	cmd.Env = envWith("CODEX_HOME", codexHome)
+	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
+		detail := strings.TrimSpace(strings.Join([]string{stdout.String(), stderr.String()}, "\n"))
 		if detail == "" {
 			detail = err.Error()
 		}
 		return fmt.Errorf("codex rejected global config: %s", detail)
 	}
 	return nil
+}
+
+func envWith(key, value string) []string {
+	prefix := key + "="
+	env := os.Environ()
+	next := make([]string, 0, len(env)+1)
+	replaced := false
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			if !replaced {
+				next = append(next, prefix+value)
+				replaced = true
+			}
+			continue
+		}
+		next = append(next, entry)
+	}
+	if !replaced {
+		next = append(next, prefix+value)
+	}
+	return next
 }
 
 func CheckGlobalAgentVersion(codexHome, runningVersion string) error {
@@ -443,8 +466,15 @@ func readGlobalAgentVersion(agent []byte) (string, bool) {
 
 func removeGlobalAgentVersion(agent []byte) []byte {
 	lines := splitLines(string(normalizeNewlines(agent)))
-	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), globalAgentVersionPrefix) {
-		lines = lines[1:]
+	for idx, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, globalAgentVersionPrefix) {
+			lines = append(lines[:idx], lines[idx+1:]...)
+		}
+		break
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
 }

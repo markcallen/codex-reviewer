@@ -248,7 +248,7 @@ printf 'CODEX_API_KEY=%s\nGITHUB_TOKEN=%s\n' "$CODEX_API_KEY" "$GITHUB_TOKEN" >>
 		"codex\nexec\n",
 		"--sandbox\ndanger-full-access\n",
 		"--output-last-message\ncodex-review/test.md\n",
-		"Review this branch against origin/main. Inspect the diff with `git diff origin/main...HEAD` and read relevant surrounding code before writing the report.\n\nfocus on docker\n",
+		"Review this branch against origin/main. Inspect the diff with `git diff origin/main...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n\nfocus on docker\n",
 		"focus on docker\n",
 		"CODEX_API_KEY=test-codex-key\n",
 		"GITHUB_TOKEN=test-github-token\n",

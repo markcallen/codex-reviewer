@@ -86,6 +86,22 @@ func TestLocalReviewArgsStructuredDiffReviewWithInstructions(t *testing.T) {
 	}
 }
 
+func TestLocalReviewArgsDiffReviewWithInstructionsNoEdit(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "Do not edit files") {
+		t.Fatalf("branch review prompt missing no-edit instruction: %v", args)
+	}
+}
+
+func TestLocalReviewArgsStructuredDiffReviewNoEdit(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Structured: true}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "Do not edit files") {
+		t.Fatalf("structured diff review prompt missing no-edit instruction: %v", args)
+	}
+}
+
 func TestLocalReviewArgsFullOverridesBase(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main", Full: true}, "codex-review/full-review.md")
 	joined := strings.Join(args, " ")
