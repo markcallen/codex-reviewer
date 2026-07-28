@@ -79,6 +79,7 @@ func RunDocker(ctx context.Context, opts DockerOptions) error {
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	configureReviewCommand(cmd)
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	if err := cmd.Run(); err != nil {

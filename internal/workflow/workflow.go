@@ -93,6 +93,7 @@ func Run(ctx context.Context, opts Options) error {
 
 func (shellRunner) Run(ctx context.Context, command string, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	configureShellCommand(cmd)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()

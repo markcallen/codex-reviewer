@@ -66,8 +66,10 @@ local_review_output="$(
   cd "$PROJECT"
   run_checked "$BIN" review local --dry-run --base origin/main --report codex-review/smoke.md
 )"
-contains "$local_review_output" "codex-reviewer: dry run: codex exec review --base origin/main"
+contains "$local_review_output" "codex-reviewer: dry run: codex exec --output-last-message"
 contains "$local_review_output" "--output-last-message"
+contains "$local_review_output" "Areas checked"
+contains "$local_review_output" "Areas not checked / limits"
 printf 'PASS: local review dry-run completed\n'
 
 submit_output="$(

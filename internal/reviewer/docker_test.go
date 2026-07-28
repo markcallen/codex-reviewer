@@ -40,8 +40,16 @@ func TestRunDockerDryRunSkipsCredentialCheck(t *testing.T) {
 func TestDockerCodexReviewArgsUseDockerSandboxBoundary(t *testing.T) {
 	args := dockerCodexReviewArgs(LocalOptions{Base: "origin/main"}, "codex-review/branch-review.md")
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "exec --sandbox danger-full-access review --base origin/main") {
+	if !strings.Contains(joined, "exec --sandbox danger-full-access --output-last-message codex-review/branch-review.md") {
 		t.Fatalf("docker codex args missing Docker sandbox boundary config: %v", args)
+	}
+	for _, want := range []string{"Review this branch against origin/main", "Areas checked", "Areas not checked / limits"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("docker codex args missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("base docker review should use prompt path for auditable output: %v", args)
 	}
 	if strings.Contains(joined, "--dangerously-bypass-approvals-and-sandbox") {
 		t.Fatalf("docker codex args use broad bypass flag: %v", args)
@@ -178,7 +186,10 @@ func TestRunDockerDryRunBuildsCommand(t *testing.T) {
 	for _, want := range []string{
 		"codex-reviewer: running Docker review with reviewer:test",
 		"docker run --rm --pull never",
-		"codex exec --sandbox danger-full-access review --base origin/main",
+		"codex exec --sandbox danger-full-access --output-last-message codex-review/branch-review.md",
+		"Review this branch against origin/main",
+		"Areas checked",
+		"Areas not checked / limits",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("dry-run output missing %q:\n%s", want, out)

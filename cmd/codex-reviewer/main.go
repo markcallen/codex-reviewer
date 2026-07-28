@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/everydaydevops/codex-code-reviewer/internal/codexconfig"
@@ -21,6 +23,10 @@ import (
 
 var version = "dev"
 var listenAndServe = http.ListenAndServe
+
+func interruptContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -91,7 +97,9 @@ func runWorkflowRun(args []string) {
 
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
-	if err := workflow.Run(context.Background(), opts); err != nil {
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := workflow.Run(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "workflow failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -362,12 +370,13 @@ func runReview(args []string) {
 func runReviewDocker(args []string) {
 	cfg := codexconfig.LoadReviewerConfig()
 	var opts reviewer.DockerOptions
+	var report string
 	defaultImage := defaultDockerImageForVersion(version)
 	fs := flag.NewFlagSet("review docker", flag.ExitOnError)
 	fs.StringVar(&opts.Image, "image", defaultImage, "review runner image")
 	fs.StringVar(&opts.Pull, "pull", "missing", "Docker pull policy: always, missing, or never")
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
-	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
+	fs.StringVar(&report, "report", "", "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
 	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
@@ -383,12 +392,15 @@ func runReviewDocker(args []string) {
 	}
 
 	opts.Dir = "."
+	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
 	if !opts.DryRun {
 		requireGlobalSetupCurrent()
 	}
-	if err := reviewer.RunDocker(context.Background(), opts); err != nil {
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := reviewer.RunDocker(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "docker review failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -410,9 +422,10 @@ func dockerTagForVersion(version string) string {
 func runReviewLocal(args []string) {
 	cfg := codexconfig.LoadReviewerConfig()
 	var opts reviewer.LocalOptions
+	var report string
 	fs := flag.NewFlagSet("review local", flag.ExitOnError)
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
-	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
+	fs.StringVar(&report, "report", "", "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
 	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
@@ -428,15 +441,28 @@ func runReviewLocal(args []string) {
 	}
 
 	opts.Dir = "."
+	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
 	if !opts.DryRun {
 		requireGlobalSetupCurrent()
 	}
-	if err := reviewer.RunLocal(context.Background(), opts); err != nil {
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := reviewer.RunLocal(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "local review failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func defaultReviewReport(flagReport, configReport, base string, full bool) string {
+	if flagReport != "" {
+		return flagReport
+	}
+	if base != "" && !full && (configReport == "" || configReport == "codex-review/full-review.md") {
+		return "codex-review/branch-review.md"
+	}
+	return configReport
 }
 
 func requireGlobalSetupCurrent() {
@@ -471,7 +497,9 @@ func runReviewPrePush(args []string) {
 	if !opts.DryRun {
 		requireGlobalSetupCurrent()
 	}
-	if err := reviewer.RunPrePush(context.Background(), opts); err != nil {
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := reviewer.RunPrePush(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "pre-push review failed: %v\n", err)
 		os.Exit(1)
 	}
