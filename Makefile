@@ -7,6 +7,7 @@ GO_MIN_VERSION ?= 1.25
 GO_INSTALL_VERSION ?= 1.25.0
 KIND_VERSION ?= v0.30.0
 KUBECTL_VERSION ?= stable
+ACTIONLINT_VERSION ?= v1.7.12
 COVERAGE_DIR ?= coverage
 COVERAGE_PROFILE ?= $(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML ?= $(COVERAGE_DIR)/coverage.html
@@ -119,6 +120,10 @@ lint: lint-actions
 	go vet ./...
 
 lint-actions:
+	@if ! command -v actionlint >/dev/null 2>&1; then \
+		mkdir -p bin; \
+		GOBIN="$(CURDIR)/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)"; \
+	fi
 	actionlint .github/workflows/*.yml
 
 deps: deps-tools deps-go-mod
