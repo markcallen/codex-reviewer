@@ -33,6 +33,11 @@ run_checked() {
   printf '%s' "$output"
 }
 
+for tool in codex git rg ssh; do
+  command -v "$tool" >/dev/null 2>&1 || fail "required tool missing: $tool"
+  printf 'PASS: required tool found: %s\n' "$tool"
+done
+
 version_output="$(run_checked "$BIN" version)"
 [ -n "$version_output" ] || fail "$BIN version produced no output"
 printf 'PASS: version output: %s\n' "$version_output"
