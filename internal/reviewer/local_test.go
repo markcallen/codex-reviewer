@@ -52,14 +52,6 @@ func TestLocalReviewArgsFullOverridesBase(t *testing.T) {
 	}
 }
 
-func TestLocalReviewArgsCanBypassSandbox(t *testing.T) {
-	args := localReviewArgs(LocalOptions{Base: "origin/main", BypassSandbox: true}, "codex-review/branch-review.md")
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "exec --dangerously-bypass-approvals-and-sandbox review --base origin/main") {
-		t.Fatalf("args missing sandbox bypass: %v", args)
-	}
-}
-
 func TestRunLocalDryRun(t *testing.T) {
 	dir := initLocalGitRepo(t)
 	var stdout bytes.Buffer

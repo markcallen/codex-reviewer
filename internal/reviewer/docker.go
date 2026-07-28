@@ -101,14 +101,18 @@ func requireDockerEnv(names []string) error {
 
 func dockerContainerReportPath(repoRoot, report string) (string, error) {
 	if !filepath.IsAbs(report) {
-		return filepath.ToSlash(report), nil
+		clean, err := cleanRelativeReportPath(report)
+		if err != nil {
+			return "", err
+		}
+		return filepath.ToSlash(clean), nil
 	}
 	rel, err := filepath.Rel(repoRoot, report)
 	if err != nil {
 		return "", fmt.Errorf("resolve report path: %w", err)
 	}
 	if rel == "." {
-		return "/workspace", nil
+		return "", fmt.Errorf("report path must be a file inside repository, not repository root: %s", report)
 	}
 	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return "", fmt.Errorf("absolute report path must be inside repository: %s", report)
@@ -118,16 +122,31 @@ func dockerContainerReportPath(repoRoot, report string) (string, error) {
 
 func dockerHostReportPath(repoRoot, report string) (string, error) {
 	if !filepath.IsAbs(report) {
-		return filepath.Join(repoRoot, filepath.FromSlash(report)), nil
+		clean, err := cleanRelativeReportPath(report)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(repoRoot, clean), nil
 	}
 	rel, err := filepath.Rel(repoRoot, report)
 	if err != nil {
 		return "", fmt.Errorf("resolve report path: %w", err)
 	}
+	if rel == "." {
+		return "", fmt.Errorf("report path must be a file inside repository, not repository root: %s", report)
+	}
 	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return "", fmt.Errorf("absolute report path must be inside repository: %s", report)
 	}
 	return report, nil
+}
+
+func cleanRelativeReportPath(report string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(report))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("relative report path must stay inside repository: %s", report)
+	}
+	return clean, nil
 }
 
 func dockerReviewArgs(repoRoot, reportPath string, opts DockerOptions) []string {

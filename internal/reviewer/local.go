@@ -11,15 +11,14 @@ import (
 )
 
 type LocalOptions struct {
-	Dir           string
-	Base          string
-	Report        string
-	Instructions  string
-	Full          bool
-	BypassSandbox bool
-	DryRun        bool
-	Stdout        io.Writer
-	Stderr        io.Writer
+	Dir          string
+	Base         string
+	Report       string
+	Instructions string
+	Full         bool
+	DryRun       bool
+	Stdout       io.Writer
+	Stderr       io.Writer
 }
 
 func RunLocal(ctx context.Context, opts LocalOptions) error {
@@ -80,9 +79,6 @@ func localReviewArgs(opts LocalOptions, reportPath string) []string {
 func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 	instructions := strings.TrimSpace(opts.Instructions)
 	baseArgs := []string{"exec"}
-	if opts.BypassSandbox {
-		baseArgs = append(baseArgs, "--dangerously-bypass-approvals-and-sandbox")
-	}
 	if opts.Base != "" && !opts.Full {
 		args := append(baseArgs, "review", "--base", opts.Base, "--output-last-message", reportPath)
 		if instructions != "" {

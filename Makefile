@@ -23,7 +23,7 @@ GHCR_TAG ?= $(VERSION)
 GHCR_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_TAG)
 GHCR_PULL_TAG ?= latest
 GHCR_PULL_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_PULL_TAG)
-REVIEW_ARGS ?=
+REVIEW_ARGS ?= review --base origin/main --output-last-message codex-review/branch-review.md
 OPENAI_SECRET ?= openai-api
 OPENAI_SECRET_KEY ?= api-key
 GITHUB_SECRET ?= github-token
@@ -207,7 +207,7 @@ docker-run-ghcr: docker-pull-runner
 		-v "$$PWD:/workspace" \
 		-w /workspace \
 		"$(GHCR_PULL_RUNNER_IMAGE)" \
-		codex-reviewer review local $(REVIEW_ARGS)
+		codex exec --sandbox danger-full-access $(REVIEW_ARGS)
 
 kind-load-runner: kind-create docker-build-runner
 	kind load docker-image "$(RUNNER_IMAGE)" --name "$(KIND_CLUSTER)"

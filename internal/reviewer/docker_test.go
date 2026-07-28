@@ -91,6 +91,18 @@ func TestDockerReportPaths(t *testing.T) {
 	if _, err := dockerHostReportPath(repoRoot, outside); err == nil {
 		t.Fatal("dockerHostReportPath(abs outside) error = nil")
 	}
+	if _, err := dockerContainerReportPath(repoRoot, repoRoot); err == nil {
+		t.Fatal("dockerContainerReportPath(repo root) error = nil")
+	}
+	if _, err := dockerHostReportPath(repoRoot, repoRoot); err == nil {
+		t.Fatal("dockerHostReportPath(repo root) error = nil")
+	}
+	if _, err := dockerContainerReportPath(repoRoot, "../review.md"); err == nil {
+		t.Fatal("dockerContainerReportPath(relative outside) error = nil")
+	}
+	if _, err := dockerHostReportPath(repoRoot, "../review.md"); err == nil {
+		t.Fatal("dockerHostReportPath(relative outside) error = nil")
+	}
 }
 
 func TestDockerReviewArgsFullReview(t *testing.T) {

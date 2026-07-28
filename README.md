@@ -78,7 +78,9 @@ docker run --rm \
   -v "$PWD:/workspace" \
   -w /workspace \
   codex-reviewer:phase1 \
-  codex-reviewer review local
+  codex exec --sandbox danger-full-access \
+    --output-last-message codex-review/full-review.md \
+    "Do a full code review of this repository. Review the entire codebase, not just the current diff. Focus on correctness, security/privacy risks, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files. Return prioritized findings with file references, severity, why each issue matters, and suggested fixes."
 ```
 
 The Docker command also writes:
@@ -203,7 +205,9 @@ docker run --rm \
   -v "$PWD:/workspace" \
   -w /workspace \
   ghcr.io/markcallen/codex-reviewer:latest \
-  codex-reviewer review local
+  codex exec --sandbox danger-full-access review \
+    --base origin/main \
+    --output-last-message codex-review/branch-review.md
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker commands and options.

@@ -427,7 +427,6 @@ func runReviewLocal(args []string) {
 	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
-	fs.BoolVar(&opts.BypassSandbox, "bypass-codex-sandbox", false, "disable Codex command sandboxing; intended for externally sandboxed container runs")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex command without running it")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review local [flags]\n\n")
