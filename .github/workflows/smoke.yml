@@ -17,6 +17,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
       - name: Smoke test local CLI
         run: make smoke-local
 
