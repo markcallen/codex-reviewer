@@ -5,6 +5,7 @@
 bin/
 coverage/
 codex-review/
+.cache/
 .tools/
 .idea/
 .vscode/

@@ -33,7 +33,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -45,8 +45,12 @@ help:
 		'  make coverage-func      Print function-level coverage' \
 		'  make coverage-html      Generate HTML coverage report' \
 		'  make test-e2e           Compile e2e tests; skips unless RUN_KIND_E2E=1' \
-		'  make lint               Run gofmt check and go vet' \
-		'  make smoke              Build container and run packaged CLI smoke check' \
+		'  make lint               Run gofmt, workflow lint, golangci-lint, and go vet' \
+		'  make lint-actions       Run GitHub Actions workflow lint' \
+		'  make smoke              Run local, Docker, and kind smoke checks' \
+		'  make smoke-local        Build local CLI and run smoke checks' \
+		'  make smoke-docker       Build container and run smoke checks' \
+		'  make smoke-k8s          Load image into kind and run smoke checks' \
 		'  make deps               Install dev tools and download Go modules' \
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
@@ -109,10 +113,13 @@ coverage-html: test
 test-e2e:
 	go test -tags=e2e ./e2e
 
-lint:
+lint: lint-actions
 	@test -z "$$(gofmt -l cmd internal e2e 2>/dev/null)" || { echo 'gofmt needed:'; gofmt -l cmd internal e2e; exit 1; }
 	golangci-lint run
 	go vet ./...
+
+lint-actions:
+	actionlint .github/workflows/*.yml
 
 deps: deps-tools deps-go-mod
 
@@ -125,8 +132,16 @@ deps-go-mod:
 check-deps:
 	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/check-dev-deps.sh
 
-smoke:
+smoke: smoke-local smoke-docker smoke-k8s
+
+smoke-local:
+	sh scripts/smoke-local.sh
+
+smoke-docker:
 	sh scripts/smoke-docker.sh
+
+smoke-k8s: kind-load-runner
+	sh scripts/smoke-k8s.sh
 
 check-e2e-deps: check-deps
 	@if [ -n "$${OPENAI_API_KEY:-}" ]; then \

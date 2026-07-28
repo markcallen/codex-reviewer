@@ -12,6 +12,7 @@ Thumbs.db
 bin/
 coverage/
 codex-review/
+.cache/
 
 # Local env files
 .env
