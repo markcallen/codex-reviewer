@@ -73,9 +73,14 @@ func RunLocal(ctx context.Context, opts LocalOptions) error {
 }
 
 func localReviewArgs(opts LocalOptions, reportPath string) []string {
+	return codexReviewArgs(opts, reportPath)
+}
+
+func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 	instructions := strings.TrimSpace(opts.Instructions)
+	baseArgs := []string{"exec"}
 	if opts.Base != "" && !opts.Full {
-		args := []string{"exec", "review", "--base", opts.Base, "--output-last-message", reportPath}
+		args := append(baseArgs, "review", "--base", opts.Base, "--output-last-message", reportPath)
 		if instructions != "" {
 			args = append(args, instructions)
 		}
@@ -85,5 +90,5 @@ func localReviewArgs(opts LocalOptions, reportPath string) []string {
 	if prompt == "" {
 		prompt = "Do a full code review of this repository. Review the entire codebase, not just the current diff. Use the code_reviewer subagent if available. Focus on correctness, security/privacy risks, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files. Return prioritized findings with file references, severity, why each issue matters, and suggested fixes. If there are no blocking issues, say that clearly and list the main areas checked."
 	}
-	return []string{"exec", "--output-last-message", reportPath, prompt}
+	return append(baseArgs, "--output-last-message", reportPath, prompt)
 }

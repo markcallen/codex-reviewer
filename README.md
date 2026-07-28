@@ -64,7 +64,7 @@ make docker-build-runner
 Then export credentials:
 
 ```bash
-export OPENAI_API_KEY=...
+export CODEX_API_KEY=...
 export GITHUB_TOKEN=...
 ```
 
@@ -73,12 +73,14 @@ And run the review with the local image:
 ```bash
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e OPENAI_API_KEY \
+  -e CODEX_API_KEY \
   -e GITHUB_TOKEN \
   -v "$PWD:/workspace" \
   -w /workspace \
   codex-reviewer:phase1 \
-  codex-reviewer review local
+  codex exec --sandbox danger-full-access \
+    --output-last-message codex-review/full-review.md \
+    "Do a full code review of this repository. Review the entire codebase, not just the current diff. Focus on correctness, security/privacy risks, missing tests, Docker/GHCR workflow problems, installer behavior, CLI behavior, maintainability, and documentation gaps. Do not edit files. Return prioritized findings with file references, severity, why each issue matters, and suggested fixes."
 ```
 
 The Docker command also writes:
@@ -86,6 +88,33 @@ The Docker command also writes:
 ```text
 codex-review/full-review.md
 ```
+
+If you want to build the local CLI but run reviews with the published GHCR
+image instead of building a local Docker image:
+
+```bash
+make build
+export CODEX_API_KEY=...
+export GITHUB_TOKEN=...
+bin/codex-reviewer review docker
+```
+
+For a private GHCR package, run `docker login ghcr.io` first with a GitHub token
+that has `read:packages` access.
+
+`review docker` checks that `CODEX_API_KEY` and `GITHUB_TOKEN` are set before
+starting Docker, then passes both through with Docker `-e` flags. When using
+`env-secrets`, store the Codex/OpenAI API key as `CODEX_API_KEY`.
+
+Because Docker is already the isolation boundary, `review docker` runs the
+inner Codex process with `--sandbox danger-full-access`. This avoids bubblewrap
+namespace failures on hosts that do not allow unprivileged user namespaces
+inside containers.
+
+`review docker` uses the release tag from the running `codex-reviewer` binary
+version. For example, `v0.1.0` and `v0.1.0-7-g8fd747e-dirty` both run
+`ghcr.io/markcallen/codex-reviewer:v0.1.0`. Development builds with version
+`dev` fall back to `latest`.
 
 ## Manual Codex Session
 
@@ -143,7 +172,7 @@ make docker-build-runner
 Publish it to GHCR:
 
 ```bash
-export GHCR_IMAGE=ghcr.io/<owner>/codex-code-reviewer
+export GHCR_IMAGE=ghcr.io/markcallen/codex-reviewer
 export GHCR_TAG=v0.1.0
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
 make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
@@ -152,17 +181,33 @@ make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
 Run a review from any checked-out repository:
 
 ```bash
-export OPENAI_API_KEY=...
+export CODEX_API_KEY=...
+export GITHUB_TOKEN=...
+codex-reviewer review docker
+```
+
+For a private GHCR package, log in first:
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
+```
+
+Or run Docker directly:
+
+```bash
+export CODEX_API_KEY=...
 export GITHUB_TOKEN=...
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e OPENAI_API_KEY \
+  -e CODEX_API_KEY \
   -e GITHUB_TOKEN \
   -v "$PWD:/workspace" \
   -w /workspace \
-  "$GHCR_IMAGE:$GHCR_TAG" \
-  codex-reviewer review local
+  ghcr.io/markcallen/codex-reviewer:latest \
+  codex exec --sandbox danger-full-access review \
+    --base origin/main \
+    --output-last-message codex-review/branch-review.md
 ```
 
 See `docs/docker-ghcr.md` for the raw Docker commands and options.

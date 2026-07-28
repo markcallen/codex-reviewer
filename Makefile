@@ -18,9 +18,12 @@ NAMESPACE ?= codex-reviewer-e2e
 SERVICE_ACCOUNT ?= codex-reviewer
 RUNNER_IMAGE ?= codex-reviewer:phase1
 SIDECAR_IMAGE ?= openai-egress:phase1
-GHCR_IMAGE ?= ghcr.io/everydaydevops/codex-code-reviewer
+GHCR_IMAGE ?= ghcr.io/markcallen/codex-reviewer
 GHCR_TAG ?= $(VERSION)
 GHCR_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_TAG)
+GHCR_PULL_TAG ?= latest
+GHCR_PULL_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_PULL_TAG)
+REVIEW_ARGS ?= review --base origin/main --output-last-message codex-review/branch-review.md
 OPENAI_SECRET ?= openai-api
 OPENAI_SECRET_KEY ?= api-key
 GITHUB_SECRET ?= github-token
@@ -30,7 +33,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -50,6 +53,8 @@ help:
 		'  make docker-build-runner Build the local reviewer container image' \
 		'  make docker-tag-runner   Tag the reviewer image for GHCR' \
 		'  make docker-push-runner  Push the reviewer image to GHCR' \
+		'  make docker-pull-runner  Pull the published reviewer image from GHCR' \
+		'  make docker-run-ghcr     Run a local review with the published GHCR image' \
 		'  make e2e                Run the kind e2e review test' \
 		'  make e2e-small          Run the kind e2e against one small repo' \
 		'  make clean              Remove local build output' \
@@ -70,6 +75,8 @@ help:
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
 		'  GHCR_RUNNER_IMAGE=$(GHCR_RUNNER_IMAGE)' \
+		'  GHCR_PULL_RUNNER_IMAGE=$(GHCR_PULL_RUNNER_IMAGE)' \
+		'  REVIEW_ARGS=$(REVIEW_ARGS)' \
 		'  OPENAI_SECRET=$(OPENAI_SECRET)' \
 		'  GITHUB_SECRET=$(GITHUB_SECRET)'
 
@@ -188,6 +195,19 @@ docker-tag-runner: docker-build-runner
 
 docker-push-runner: docker-tag-runner
 	docker push "$(GHCR_RUNNER_IMAGE)"
+
+docker-pull-runner:
+	docker pull "$(GHCR_PULL_RUNNER_IMAGE)"
+
+docker-run-ghcr: docker-pull-runner
+	docker run --rm \
+		--user "$$(id -u):$$(id -g)" \
+		-e CODEX_API_KEY \
+		-e GITHUB_TOKEN \
+		-v "$$PWD:/workspace" \
+		-w /workspace \
+		"$(GHCR_PULL_RUNNER_IMAGE)" \
+		codex exec --sandbox danger-full-access $(REVIEW_ARGS)
 
 kind-load-runner: kind-create docker-build-runner
 	kind load docker-image "$(RUNNER_IMAGE)" --name "$(KIND_CLUSTER)"
