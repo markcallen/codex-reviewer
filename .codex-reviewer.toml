@@ -1,0 +1,7 @@
+version = "v0.1.2"
+
+[review.pre_push]
+base = ""
+block_on = "block"
+report = ".git/codex-review/pre-push-review.md"
+require_clean_tree = true

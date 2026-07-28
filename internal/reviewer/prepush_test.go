@@ -60,6 +60,26 @@ require_clean_tree = false
 	assertContains(t, out, filepath.Join(dir, ".git/codex-review/custom.md"))
 }
 
+func TestRunPrePushComparesReleaseTags(t *testing.T) {
+	dir := initGitRepo(t)
+	writeReviewerConfig(t, dir, `version = "v1.2.3"
+
+[review.pre_push]
+base = "origin/main"
+require_clean_tree = false
+`)
+
+	err := RunPrePush(context.Background(), PrePushOptions{
+		Dir:     dir,
+		Version: "v1.2.3-4-gabcdef-dirty",
+		DryRun:  true,
+		Stdout:  &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("RunPrePush() error = %v", err)
+	}
+}
+
 func TestResolveBaseFallsBackToMain(t *testing.T) {
 	dir := initGitRepo(t)
 	if got := resolveBase(context.Background(), dir); got != "main" {

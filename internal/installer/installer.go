@@ -6,14 +6,18 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
 )
 
 const (
-	reviewBlockMarker = "CODEX REVIEWER INSTALLER"
+	reviewBlockMarker        = "CODEX REVIEWER INSTALLER"
+	globalAgentVersionPrefix = "# codex-reviewer-version = "
 )
 
 var defaultArtifacts = []artifact{
@@ -59,6 +63,7 @@ type Action struct {
 
 type GlobalOptions struct {
 	CodexHome string
+	Version   string
 	DryRun    bool
 }
 
@@ -109,6 +114,9 @@ func Install(opts Options) (Result, error) {
 }
 
 func InstallGlobal(opts GlobalOptions) (Result, error) {
+	if opts.Version == "" {
+		opts.Version = "dev"
+	}
 	codexHome := opts.CodexHome
 	if codexHome == "" {
 		if env := os.Getenv("CODEX_HOME"); env != "" {
@@ -126,7 +134,7 @@ func InstallGlobal(opts GlobalOptions) (Result, error) {
 		return Result{}, err
 	}
 
-	i := installRun{opts: Options{DryRun: opts.DryRun}, targetDir: codexHome}
+	i := installRun{opts: Options{DryRun: opts.DryRun, Version: opts.Version}, targetDir: codexHome}
 	if err := i.installGlobalAgent(); err != nil {
 		return i.result, err
 	}
@@ -184,7 +192,29 @@ func (i *installRun) installConfig() error {
 }
 
 func (i *installRun) installGlobalAgent() error {
-	return i.installArtifact(artifact{Source: "artifacts/codex/agents/code-reviewer.toml", Dest: "agents/code-reviewer.toml", Merge: mergeNone})
+	dest := "agents/code-reviewer.toml"
+	bundled, err := readArtifact("artifacts/codex/agents/code-reviewer.toml")
+	if err != nil {
+		return err
+	}
+	versioned := addGlobalAgentVersion(bundled, i.opts.Version)
+	current, exists, err := i.readTarget(dest)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return i.writeTarget(dest, versioned, "create", "installed bundled artifact")
+	}
+	if bytes.Equal(normalizeNewlines(current), normalizeNewlines(versioned)) {
+		i.add("skip", dest, "already installed")
+		return nil
+	}
+	if bytes.Equal(removeGlobalAgentVersion(current), normalizeNewlines(bundled)) {
+		return i.writeTarget(dest, versioned, "merge", "updated global reviewer agent version")
+	}
+	i.add("keep", dest, "existing file differs; left unchanged")
+	i.result.Warnings = append(i.result.Warnings, fmt.Sprintf("%s already exists and differs from the bundled artifact", dest))
+	return nil
 }
 
 func (i *installRun) installGlobalConfig() error {
@@ -207,6 +237,7 @@ func (i *installRun) installGlobalConfig() error {
 }
 
 func defaultReviewerConfig(version string) string {
+	version = versionutil.ReleaseTag(version)
 	return fmt.Sprintf(`version = %q
 
 [review.pre_push]
@@ -218,6 +249,7 @@ require_clean_tree = true
 }
 
 func mergeReviewerConfigVersion(current []byte, version string) []byte {
+	version = versionutil.ReleaseTag(version)
 	lines := splitLines(string(normalizeNewlines(current)))
 	for idx, line := range lines {
 		if sectionHeaderRE.MatchString(line) {
@@ -244,6 +276,12 @@ func (i *installRun) installAGENTS() error {
 	}
 	if !exists {
 		return i.writeTarget(dest, bundled, "create", "installed repository review guidance")
+	}
+	text := string(normalizeNewlines(current))
+	if strings.Contains(text, "BEGIN "+reviewBlockMarker+": agents-review-expectations") ||
+		strings.Contains(text, "Follow `docs/code_review.md` for code reviews.") {
+		i.add("skip", dest, "review guidance already present")
+		return nil
 	}
 	next := appendManagedBlock(current, "agents-review-expectations", agentsReviewBlock())
 	if bytes.Equal(current, next) {
@@ -323,6 +361,92 @@ func readArtifact(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read embedded artifact %s: %w", path, err)
 	}
 	return data, nil
+}
+
+func ValidateGlobalCodexConfig(codexHome string) error {
+	if codexHome == "" {
+		if env := os.Getenv("CODEX_HOME"); env != "" {
+			codexHome = env
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("discover home directory: %w", err)
+			}
+			codexHome = filepath.Join(home, ".codex")
+		}
+	}
+	cmd := exec.Command("codex", "--strict-config", "--help")
+	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderr.String())
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("codex rejected global config: %s", detail)
+	}
+	return nil
+}
+
+func CheckGlobalAgentVersion(codexHome, runningVersion string) error {
+	runningVersion = versionutil.ReleaseTag(runningVersion)
+	if codexHome == "" {
+		if env := os.Getenv("CODEX_HOME"); env != "" {
+			codexHome = env
+		} else {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("discover home directory: %w", err)
+			}
+			codexHome = filepath.Join(home, ".codex")
+		}
+	}
+	path := filepath.Join(codexHome, "agents", "code-reviewer.toml")
+	current, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%s is missing; run codex-reviewer setup with this binary", path)
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	installed, ok := readGlobalAgentVersion(current)
+	if !ok {
+		return fmt.Errorf("%s has no codex-reviewer version marker; run codex-reviewer setup with this binary", path)
+	}
+	installed = versionutil.ReleaseTag(installed)
+	if installed != runningVersion {
+		return fmt.Errorf("%s version mismatch: installed by codex-reviewer %q, running %q; run codex-reviewer setup with this binary", path, installed, runningVersion)
+	}
+	return nil
+}
+
+func addGlobalAgentVersion(agent []byte, version string) []byte {
+	version = versionutil.ReleaseTag(version)
+	body := strings.TrimLeft(string(removeGlobalAgentVersion(agent)), "\n")
+	return []byte(fmt.Sprintf("%s%q\n%s", globalAgentVersionPrefix, version, body))
+}
+
+func readGlobalAgentVersion(agent []byte) (string, bool) {
+	for _, line := range splitLines(string(normalizeNewlines(agent))) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, globalAgentVersionPrefix) {
+			return "", false
+		}
+		return unquote(strings.TrimSpace(strings.TrimPrefix(line, globalAgentVersionPrefix))), true
+	}
+	return "", false
+}
+
+func removeGlobalAgentVersion(agent []byte) []byte {
+	lines := splitLines(string(normalizeNewlines(agent)))
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), globalAgentVersionPrefix) {
+		lines = lines[1:]
+	}
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 func optsAGENTSPath(path string) string {
@@ -557,6 +681,15 @@ func keyLineMatches(line, key string) bool {
 	}
 	rest = strings.TrimLeft(rest, " \t")
 	return strings.HasPrefix(rest, "=")
+}
+
+func unquote(value string) string {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, `\"`, `"`)
+		value = strings.ReplaceAll(value, `\\`, `\`)
+	}
+	return value
 }
 
 func splitLines(text string) []string {

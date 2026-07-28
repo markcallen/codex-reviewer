@@ -48,6 +48,27 @@ func TestDockerCodexReviewArgsUseDockerSandboxBoundary(t *testing.T) {
 	}
 }
 
+func TestDockerCodexReviewArgsStructuredDiffReview(t *testing.T) {
+	args := dockerCodexReviewArgs(LocalOptions{Base: "origin/main", Structured: true}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"exec --sandbox danger-full-access --output-last-message",
+		"Review this branch against origin/main.",
+		"git diff origin/main...HEAD",
+		"Do a structured code review.",
+		"Diff summary",
+		"Areas checked",
+		"Areas not checked / limits",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("docker codex args missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("structured docker review should use prompt path because codex review rejects --base with prompt: %v", args)
+	}
+}
+
 func TestDockerReportPaths(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "repo")
 	inside := filepath.Join(repoRoot, "codex-review", "branch-review.md")

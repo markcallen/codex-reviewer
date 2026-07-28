@@ -217,6 +217,7 @@ func TestRunReviewDockerDryRun(t *testing.T) {
 func TestRunReviewDockerWithFakeDocker(t *testing.T) {
 	dir := initTestGitRepo(t)
 	t.Chdir(dir)
+	installTestGlobalSetup(t)
 	binDir := t.TempDir()
 	argsFile := filepath.Join(t.TempDir(), "docker-args.txt")
 	writeExecutable(t, filepath.Join(binDir, "docker"), `#!/bin/sh
@@ -246,9 +247,8 @@ printf 'CODEX_API_KEY=%s\nGITHUB_TOKEN=%s\n' "$CODEX_API_KEY" "$GITHUB_TOKEN" >>
 		"reviewer:test\n",
 		"codex\nexec\n",
 		"--sandbox\ndanger-full-access\n",
-		"review\n",
-		"--base\norigin/main\n",
 		"--output-last-message\ncodex-review/test.md\n",
+		"Review this branch against origin/main. Inspect the diff with `git diff origin/main...HEAD` and read relevant surrounding code before writing the report.\n\nfocus on docker\n",
 		"focus on docker\n",
 		"CODEX_API_KEY=test-codex-key\n",
 		"GITHUB_TOKEN=test-github-token\n",
@@ -257,6 +257,15 @@ printf 'CODEX_API_KEY=%s\nGITHUB_TOKEN=%s\n' "$CODEX_API_KEY" "$GITHUB_TOKEN" >>
 			t.Fatalf("docker args missing %q:\n%s", want, got)
 		}
 	}
+}
+
+func installTestGlobalSetup(t *testing.T) {
+	t.Helper()
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if _, err := installer.InstallGlobal(installer.GlobalOptions{CodexHome: codexHome, Version: version}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+	t.Setenv("CODEX_HOME", codexHome)
 }
 
 func TestRunReviewPrePushDryRun(t *testing.T) {
@@ -282,6 +291,8 @@ func TestRunInstallSetupAndDoctor(t *testing.T) {
 	runInstall([]string{"--dry-run", target})
 	runInstall([]string{"--quiet", target})
 	runDoctor([]string{target})
+	t.Chdir(target)
+	runDoctor(nil)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
 	runSetup([]string{"--dry-run", "--codex-home", codexHome})

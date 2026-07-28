@@ -30,7 +30,7 @@ func TestInstallCreatesFreshProjectFiles(t *testing.T) {
 func TestInstallCreatesReviewerConfigWithRuntimeVersion(t *testing.T) {
 	dir := t.TempDir()
 
-	if _, err := Install(Options{TargetDir: dir, Version: "v1.2.3"}); err != nil {
+	if _, err := Install(Options{TargetDir: dir, Version: "v1.2.3-4-gabcdef-dirty"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
@@ -91,6 +91,26 @@ func TestInstallIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestInstallDoesNotAppendDuplicateAGENTSWhenGuidanceExists(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "AGENTS.md", `# Existing guidance
+
+- Follow `+"`docs/code_review.md`"+` for code reviews.
+`)
+
+	if _, err := Install(Options{TargetDir: dir}); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+
+	agents := readFile(t, dir, "AGENTS.md")
+	if strings.Contains(agents, "BEGIN CODEX REVIEWER INSTALLER: agents-review-expectations") {
+		t.Fatalf("AGENTS.md should not get duplicate managed guidance:\n%s", agents)
+	}
+	if strings.Count(agents, "Follow `docs/code_review.md` for code reviews.") != 1 {
+		t.Fatalf("AGENTS.md should keep exactly one review guidance line:\n%s", agents)
+	}
+}
+
 func TestInstallUpdatesExistingReviewerConfigVersion(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, ".codex-reviewer.toml", `version = "v1.0.0"
@@ -124,11 +144,12 @@ func TestInstallDryRunDoesNotWrite(t *testing.T) {
 func TestInstallGlobalCreatesCodexHome(t *testing.T) {
 	dir := t.TempDir()
 
-	result, err := InstallGlobal(GlobalOptions{CodexHome: dir})
+	result, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v1.2.3-4-gabcdef-dirty"})
 	if err != nil {
 		t.Fatalf("InstallGlobal() error = %v", err)
 	}
 
+	requireFileContains(t, dir, "agents/code-reviewer.toml", `# codex-reviewer-version = "v1.2.3"`)
 	requireFileContains(t, dir, "agents/code-reviewer.toml", `name = "code_reviewer"`)
 	config := readFile(t, dir, "config.toml")
 	assertContains(t, config, `model = "gpt-5.5"`)
@@ -142,6 +163,84 @@ func TestInstallGlobalCreatesCodexHome(t *testing.T) {
 	if len(result.Actions) == 0 {
 		t.Fatal("InstallGlobal() returned no actions")
 	}
+}
+
+func TestInstallGlobalUpdatesGeneratedAgentVersion(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v1.0.0"}); err != nil {
+		t.Fatalf("InstallGlobal(v1.0.0) error = %v", err)
+	}
+
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v2.0.0"}); err != nil {
+		t.Fatalf("InstallGlobal(v2.0.0) error = %v", err)
+	}
+
+	agent := readFile(t, dir, "agents/code-reviewer.toml")
+	assertContains(t, agent, `# codex-reviewer-version = "v2.0.0"`)
+	if strings.Contains(agent, `# codex-reviewer-version = "v1.0.0"`) {
+		t.Fatalf("global agent kept old version marker:\n%s", agent)
+	}
+}
+
+func TestInstallGlobalAddsVersionToOldGeneratedAgent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	bundled, err := readArtifact("artifacts/codex/agents/code-reviewer.toml")
+	if err != nil {
+		t.Fatalf("readArtifact() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agents/code-reviewer.toml"), bundled, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v2.0.0"}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	requireFileContains(t, dir, "agents/code-reviewer.toml", `# codex-reviewer-version = "v2.0.0"`)
+}
+
+func TestCheckGlobalAgentVersion(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := InstallGlobal(GlobalOptions{CodexHome: dir, Version: "v1.2.3"}); err != nil {
+		t.Fatalf("InstallGlobal() error = %v", err)
+	}
+
+	if err := CheckGlobalAgentVersion(dir, "v1.2.3-4-gabcdef-dirty"); err != nil {
+		t.Fatalf("CheckGlobalAgentVersion(matching) error = %v", err)
+	}
+	err := CheckGlobalAgentVersion(dir, "v2.0.0")
+	if err == nil {
+		t.Fatal("CheckGlobalAgentVersion(mismatch) error = nil")
+	}
+	if !strings.Contains(err.Error(), "run codex-reviewer setup") {
+		t.Fatalf("CheckGlobalAgentVersion() error = %v, want setup guidance", err)
+	}
+}
+
+func TestValidateGlobalCodexConfigUsesStrictConfig(t *testing.T) {
+	dir := t.TempDir()
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "codex.log")
+	codexPath := filepath.Join(binDir, "codex")
+	if err := os.WriteFile(codexPath, []byte(`#!/bin/sh
+printf '%s\n' "$@" > "`+logPath+`"
+printf 'CODEX_HOME=%s\n' "$CODEX_HOME" >> "`+logPath+`"
+exit 0
+`), 0o755); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ValidateGlobalCodexConfig(dir); err != nil {
+		t.Fatalf("ValidateGlobalCodexConfig() error = %v", err)
+	}
+	log := string(mustReadFile(t, logPath))
+	assertContains(t, log, "--strict-config")
+	assertContains(t, log, "--help")
+	assertContains(t, log, "CODEX_HOME="+dir)
 }
 
 func TestInstallGlobalMergesExistingConfig(t *testing.T) {
@@ -192,11 +291,11 @@ func TestInstallGlobalDryRunDoesNotWrite(t *testing.T) {
 
 func TestDoctorReportsInstalledProjectOK(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Install(Options{TargetDir: dir}); err != nil {
+	if _, err := Install(Options{TargetDir: dir, Version: "v1.2.3-4-gabcdef-dirty"}); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
 
-	report, err := Doctor(DoctorOptions{TargetDir: dir})
+	report, err := Doctor(DoctorOptions{TargetDir: dir, Version: "v1.2.3-5-g1234567-dirty"})
 	if err != nil {
 		t.Fatalf("Doctor() error = %v", err)
 	}
@@ -279,6 +378,15 @@ func readFile(t *testing.T, dir, rel string) string {
 		t.Fatalf("ReadFile(%s) error = %v", rel, err)
 	}
 	return string(data)
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	return data
 }
 
 func writeFile(t *testing.T, dir, rel, content string) {

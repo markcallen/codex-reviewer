@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
 )
 
 type DoctorOptions struct {
@@ -116,8 +118,10 @@ func (d *doctorRun) checkReviewerConfig() {
 		d.add("incomplete", dest, "missing top-level version")
 		return
 	}
-	if version != d.opts.Version {
-		d.add("mismatch", dest, fmt.Sprintf("installed version %q does not match running version %q", version, d.opts.Version))
+	installedVersion := versionutil.ReleaseTag(version)
+	runningVersion := versionutil.ReleaseTag(d.opts.Version)
+	if installedVersion != runningVersion {
+		d.add("mismatch", dest, fmt.Sprintf("installed version %q does not match running version %q", installedVersion, runningVersion))
 		return
 	}
 	d.add("ok", dest, "codex-reviewer version matches")
