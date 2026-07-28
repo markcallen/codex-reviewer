@@ -90,7 +90,7 @@ The installer is non-destructive. It creates missing files, merges missing revie
 Verify the setup:
 
 ```bash
-bin/codex-reviewer doctor /path/to/your/repo
+bin/codex-reviewer doctor
 ```
 
 The installed `.codex-reviewer.toml` records the CLI version used for the
@@ -112,6 +112,12 @@ This copies the reviewer agent to `~/.codex/agents/code-reviewer.toml` and
 merges missing reviewer settings into `~/.codex/config.toml` after showing the
 planned changes and asking for confirmation. Use `bin/codex-reviewer setup --yes`
 for unattended setup.
+
+The global reviewer agent records the `codex-reviewer` version that created it.
+Non-dry review commands check that marker and stop with setup guidance when the
+installed global reviewer was created by a different CLI version. `setup` also
+runs a strict Codex config parse check after applying changes and warns if the
+installed Codex CLI rejects the generated config.
 
 The setup command also writes:
 
@@ -176,6 +182,19 @@ Non-interactive branch review:
 ```bash
 codex-reviewer review local --base origin/main --report codex-review/branch-review.md
 ```
+
+Structured branch review for large or high-risk changes:
+
+```bash
+codex-reviewer review local \
+  --base origin/main \
+  --structured \
+  --report codex-review/branch-review.md
+```
+
+Structured mode requires the report to include a diff summary, areas checked,
+areas not checked or not deeply verified, prioritized findings, and tests to
+run.
 
 Non-interactive full repository review:
 

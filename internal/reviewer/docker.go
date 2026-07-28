@@ -21,6 +21,7 @@ type DockerOptions struct {
 	Base         string
 	Report       string
 	Instructions string
+	Structured   bool
 	Full         bool
 	DryRun       bool
 	Stdout       io.Writer
@@ -165,6 +166,7 @@ func dockerReviewArgs(repoRoot, reportPath string, opts DockerOptions) []string 
 		Base:         opts.Base,
 		Report:       opts.Report,
 		Instructions: opts.Instructions,
+		Structured:   opts.Structured,
 		Full:         opts.Full,
 	}
 	return append(args, append([]string{"codex"}, dockerCodexReviewArgs(reviewOpts, reportPath)...)...)

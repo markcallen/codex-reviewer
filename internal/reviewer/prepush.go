@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
 )
 
 const ConfigFile = ".codex-reviewer.toml"
@@ -55,8 +57,10 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 	if err != nil {
 		return err
 	}
-	if cfg.Version != opts.Version {
-		return fmt.Errorf("%s version mismatch: installed %q, running %q; run codex-reviewer install . with the expected binary", ConfigFile, cfg.Version, opts.Version)
+	installedVersion := versionutil.ReleaseTag(cfg.Version)
+	runningVersion := versionutil.ReleaseTag(opts.Version)
+	if installedVersion != runningVersion {
+		return fmt.Errorf("%s version mismatch: installed %q, running %q; run codex-reviewer install . with the expected binary", ConfigFile, installedVersion, runningVersion)
 	}
 
 	base := firstNonEmpty(opts.Base, cfg.Base)

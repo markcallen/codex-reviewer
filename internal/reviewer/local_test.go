@@ -37,10 +37,68 @@ func TestLocalReviewArgsDiffReviewWithBase(t *testing.T) {
 func TestLocalReviewArgsDiffReviewWithInstructions(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--output-last-message", "Focus on security."} {
+	for _, want := range []string{"exec --output-last-message", "Review this branch against origin/main.", "git diff origin/main...HEAD", "Focus on security."} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
+	}
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("custom diff review should use prompt path because codex review rejects --base with prompt: %v", args)
+	}
+}
+
+func TestLocalReviewArgsStructuredDiffReview(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Structured: true}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"exec --output-last-message",
+		"Review this branch against origin/main.",
+		"git diff origin/main...HEAD",
+		"Do a structured code review.",
+		"Areas checked",
+		"Areas not checked / limits",
+		"Do not stop after the first few findings.",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %v", want, args)
+		}
+	}
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("structured diff review should use prompt path because codex review rejects --base with prompt: %v", args)
+	}
+}
+
+func TestLocalReviewArgsStructuredDiffReviewWithInstructions(t *testing.T) {
+	args := localReviewArgs(LocalOptions{
+		Base:         "origin/main",
+		Instructions: "Pay special attention to Step CA.",
+		Structured:   true,
+	}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"Do a structured code review.",
+		"Additional caller instructions:",
+		"Pay special attention to Step CA.",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %v", want, args)
+		}
+	}
+}
+
+func TestLocalReviewArgsDiffReviewWithInstructionsNoEdit(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "Do not edit files") {
+		t.Fatalf("branch review prompt missing no-edit instruction: %v", args)
+	}
+}
+
+func TestLocalReviewArgsStructuredDiffReviewNoEdit(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Structured: true}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "Do not edit files") {
+		t.Fatalf("structured diff review prompt missing no-edit instruction: %v", args)
 	}
 }
 
@@ -49,6 +107,17 @@ func TestLocalReviewArgsFullOverridesBase(t *testing.T) {
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "review --base") {
 		t.Fatalf("--full should force full review: %v", args)
+	}
+}
+
+func TestLocalReviewArgsStructuredFullOverridesBase(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Full: true, Structured: true}, "codex-review/full-review.md")
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "review --base") {
+		t.Fatalf("--full should force full review: %v", args)
+	}
+	if !strings.Contains(joined, "Do a structured code review.") {
+		t.Fatalf("structured full review prompt missing: %v", args)
 	}
 }
 

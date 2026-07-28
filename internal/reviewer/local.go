@@ -15,6 +15,7 @@ type LocalOptions struct {
 	Base         string
 	Report       string
 	Instructions string
+	Structured   bool
 	Full         bool
 	DryRun       bool
 	Stdout       io.Writer
@@ -77,14 +78,13 @@ func localReviewArgs(opts LocalOptions, reportPath string) []string {
 }
 
 func codexReviewArgs(opts LocalOptions, reportPath string) []string {
-	instructions := strings.TrimSpace(opts.Instructions)
+	instructions := reviewInstructions(opts)
 	baseArgs := []string{"exec"}
 	if opts.Base != "" && !opts.Full {
-		args := append(baseArgs, "review", "--base", opts.Base, "--output-last-message", reportPath)
-		if instructions != "" {
-			args = append(args, instructions)
+		if instructions == "" {
+			return append(baseArgs, "review", "--base", opts.Base, "--output-last-message", reportPath)
 		}
-		return args
+		return append(baseArgs, "--output-last-message", reportPath, branchReviewPrompt(opts.Base, instructions))
 	}
 	prompt := instructions
 	if prompt == "" {
@@ -92,3 +92,37 @@ func codexReviewArgs(opts LocalOptions, reportPath string) []string {
 	}
 	return append(baseArgs, "--output-last-message", reportPath, prompt)
 }
+
+func branchReviewPrompt(base, instructions string) string {
+	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `git diff %s...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n\n%s", base, base, instructions)
+}
+
+func reviewInstructions(opts LocalOptions) string {
+	custom := strings.TrimSpace(opts.Instructions)
+	if !opts.Structured {
+		return custom
+	}
+	if custom == "" {
+		return structuredReviewPrompt
+	}
+	return structuredReviewPrompt + "\n\nAdditional caller instructions:\n" + custom
+}
+
+const structuredReviewPrompt = `Do a structured code review.
+
+Review scope:
+- Inspect the requested branch diff or full repository scope, then identify the major subsystems touched before writing findings.
+- Read relevant surrounding code for each high-risk subsystem instead of only isolated diff hunks.
+- Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, persistence/migration risk, concurrency, error handling, tests, CI/build behavior, deployment/runtime behavior, and documentation required by user-visible changes.
+- Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
+- Do not edit files; write only the review report.
+
+Required report format:
+1. Start with exactly one verdict line: "Block", "Approve with fixes", or "No blocking findings".
+2. Add "Diff summary" with the base/ref reviewed, approximate changed-file count if available, and the major subsystems touched.
+3. Add "Areas checked" with a concise bullet for every touched subsystem you inspected and the risk classes checked there.
+4. Add "Areas not checked / limits" for any subsystem, generated artifact, dependency surface, test path, or runtime behavior not deeply verified. Say "None" only if you actually checked all relevant areas.
+5. Add "Findings" in priority order. For each finding include severity, title, file/line evidence, failure path, why it matters, and a small suggested fix or targeted test.
+6. Add "Tests to run" with the smallest useful validation commands.
+
+Do not stop after the first few findings. Report every concrete P0, P1, and P2 issue found, but do not invent speculative issues without an execution path.`

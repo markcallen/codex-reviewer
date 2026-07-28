@@ -55,6 +55,20 @@ For a branch review against `origin/main`:
 bin/codex-reviewer review local --base origin/main --report codex-review/branch-review.md
 ```
 
+For a large or risky branch, require a structured report with subsystem
+coverage and explicit review limits:
+
+```bash
+bin/codex-reviewer review local \
+  --base origin/main \
+  --structured \
+  --report codex-review/branch-review.md
+```
+
+Structured review mode asks Codex to summarize the diff, list areas checked,
+list areas not checked or not deeply verified, report all concrete P0-P2
+findings, and include the smallest useful validation commands.
+
 To run the same app in an isolated local Docker container, build the image:
 
 ```bash
@@ -148,6 +162,12 @@ codex-reviewer setup
 The setup command installs the agent and merges missing reviewer settings into
 `~/.codex/config.toml` after showing the planned changes and asking for
 confirmation. Use `codex-reviewer setup --yes` for unattended setup.
+
+`setup` records the `codex-reviewer` version that created
+`~/.codex/agents/code-reviewer.toml` and validates the resulting Codex config
+with `codex --strict-config --help`. Non-dry review commands check that marker
+before running and ask you to rerun `codex-reviewer setup` when the installed
+global reviewer was created by a different CLI version.
 
 The default backend is local:
 

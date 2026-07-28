@@ -15,6 +15,7 @@ import (
 	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
 	"github.com/everydaydevops/codex-code-reviewer/internal/service"
+	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
 	"github.com/everydaydevops/codex-code-reviewer/internal/workflow"
 )
 
@@ -368,6 +369,7 @@ func runReviewDocker(args []string) {
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
 	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the docker command without running it")
 	fs.Usage = func() {
@@ -383,6 +385,9 @@ func runReviewDocker(args []string) {
 	opts.Dir = "."
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
+	if !opts.DryRun {
+		requireGlobalSetupCurrent()
+	}
 	if err := reviewer.RunDocker(context.Background(), opts); err != nil {
 		fmt.Fprintf(os.Stderr, "docker review failed: %v\n", err)
 		os.Exit(1)
@@ -395,28 +400,11 @@ func defaultDockerImageForVersion(version string) string {
 }
 
 func dockerTagForVersion(version string) string {
-	tag := strings.TrimSpace(version)
+	tag := versionutil.ReleaseTag(version)
 	if tag == "" || tag == "dev" {
 		return "latest"
 	}
-	tag = strings.TrimSuffix(tag, "-dirty")
-	parts := strings.Split(tag, "-")
-	if len(parts) >= 3 && isDecimal(parts[len(parts)-2]) && strings.HasPrefix(parts[len(parts)-1], "g") {
-		return strings.Join(parts[:len(parts)-2], "-")
-	}
 	return tag
-}
-
-func isDecimal(value string) bool {
-	if value == "" {
-		return false
-	}
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func runReviewLocal(args []string) {
@@ -426,6 +414,7 @@ func runReviewLocal(args []string) {
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
 	fs.StringVar(&opts.Report, "report", cfg.Report, "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex command without running it")
 	fs.Usage = func() {
@@ -441,8 +430,18 @@ func runReviewLocal(args []string) {
 	opts.Dir = "."
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
+	if !opts.DryRun {
+		requireGlobalSetupCurrent()
+	}
 	if err := reviewer.RunLocal(context.Background(), opts); err != nil {
 		fmt.Fprintf(os.Stderr, "local review failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func requireGlobalSetupCurrent() {
+	if err := installer.CheckGlobalAgentVersion("", version); err != nil {
+		fmt.Fprintf(os.Stderr, "global setup check failed: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -469,6 +468,9 @@ func runReviewPrePush(args []string) {
 	opts.Version = version
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
+	if !opts.DryRun {
+		requireGlobalSetupCurrent()
+	}
 	if err := reviewer.RunPrePush(context.Background(), opts); err != nil {
 		fmt.Fprintf(os.Stderr, "pre-push review failed: %v\n", err)
 		os.Exit(1)
@@ -535,6 +537,7 @@ func runSetup(args []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
+	opts.Version = version
 
 	planOpts := opts
 	planOpts.DryRun = true
@@ -556,6 +559,7 @@ func runSetup(args []string) {
 		fmt.Println()
 		printActions(result.Actions)
 		printWarnings(result.Warnings)
+		validateGlobalCodexConfig(opts.CodexHome)
 		return
 	}
 
@@ -580,9 +584,21 @@ func runSetup(args []string) {
 	fmt.Println()
 	printActions(result.Actions)
 	printWarnings(result.Warnings)
+	validateGlobalCodexConfig(opts.CodexHome)
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println("  codex-reviewer review local")
+}
+
+func validateGlobalCodexConfig(codexHome string) {
+	if err := installer.ValidateGlobalCodexConfig(codexHome); err != nil {
+		fmt.Println()
+		fmt.Printf("Warning: Codex strict config validation failed: %v\n", err)
+		fmt.Println("Run `codex doctor` for details after checking your Codex installation.")
+		return
+	}
+	fmt.Println()
+	fmt.Println("Codex strict config validation passed.")
 }
 
 func allSkipped(actions []installer.Action) bool {
@@ -617,18 +633,22 @@ func runDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	fs.StringVar(&agentsFile, "agents-file", "AGENTS.md", "repository guidance file to check")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer doctor [flags] /path/to/project\n\n")
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer doctor [flags] [path]\n\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(args)
 
-	if fs.NArg() != 1 {
+	if fs.NArg() > 1 {
 		fs.Usage()
 		os.Exit(2)
 	}
+	target := "."
+	if fs.NArg() == 1 {
+		target = fs.Arg(0)
+	}
 
 	report, err := installer.Doctor(installer.DoctorOptions{
-		TargetDir:  fs.Arg(0),
+		TargetDir:  target,
 		AGENTSFile: agentsFile,
 		Version:    version,
 	})
@@ -648,7 +668,7 @@ func runDoctor(args []string) {
 	if !report.OK {
 		fmt.Println()
 		fmt.Println("Run:")
-		fmt.Println("  codex-reviewer install " + fs.Arg(0))
+		fmt.Println("  codex-reviewer install " + target)
 		os.Exit(1)
 	}
 }
