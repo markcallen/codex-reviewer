@@ -20,7 +20,7 @@ func TestInstallCreatesFreshProjectFiles(t *testing.T) {
 	requireFileContains(t, dir, ".codex/agents/code-reviewer.toml", `name = "code_reviewer"`)
 	requireFileContains(t, dir, "AGENTS.md", "Project review expectations")
 	requireFileContains(t, dir, "docs/code_review.md", "Code review checklist for Codex")
-	requireFileContains(t, dir, "prompts/review-branch.md", "Review this branch against main")
+	requireFileNotExists(t, dir, "prompts")
 
 	if len(result.Actions) == 0 {
 		t.Fatal("Install() returned no actions")
@@ -438,6 +438,13 @@ func TestDoctorReportsReviewerVersionMismatch(t *testing.T) {
 func requireFileContains(t *testing.T, dir, rel, want string) {
 	t.Helper()
 	assertContains(t, readFile(t, dir, rel), want)
+}
+
+func requireFileNotExists(t *testing.T, dir, rel string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+		t.Fatalf("%s should not exist, stat err = %v", rel, err)
+	}
 }
 
 func assertContains(t *testing.T, got, want string) {

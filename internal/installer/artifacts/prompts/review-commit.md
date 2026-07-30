@@ -1,1 +1,0 @@
-Review commit <commit-sha>. Spawn the code_reviewer subagent in read-only mode, inspect the commit diff and relevant surrounding code, wait for it to finish, then summarize prioritized findings with file references and suggested fixes. Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.

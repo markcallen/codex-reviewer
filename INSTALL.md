@@ -7,7 +7,6 @@ This repository contains a project-scoped Codex reviewer setup:
 - `.codex/agents/code-reviewer.toml` — the custom read-only `code_reviewer` subagent.
 - `AGENTS.md` — repository-level review guidance Codex reads before work.
 - `docs/code_review.md` — team review checklist referenced by `AGENTS.md`.
-- `prompts/` — copy/paste prompts for branch, PR, commit, and uncommitted-change reviews.
 - `cmd/codex-reviewer/` — a self-contained Go CLI with embedded artifacts.
 - `scripts/` — development helpers.
 
@@ -79,7 +78,7 @@ bin/codex-reviewer install /path/to/your/repo
 Then from your target repo:
 
 ```bash
-git add .codex .codex-reviewer.toml AGENTS.md docs/code_review.md prompts/
+git add .codex .codex-reviewer.toml AGENTS.md docs/code_review.md
 git commit -m "Add Codex code reviewer subagent"
 ```
 
@@ -168,14 +167,6 @@ docker run --rm \
 See `docs/docker-ghcr.md` for the raw Docker command and runtime options.
 
 ## 7. Run it
-
-Interactive:
-
-```bash
-codex
-```
-
-Then paste one of the prompts from `prompts/`.
 
 Non-interactive branch review:
 

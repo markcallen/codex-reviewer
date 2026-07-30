@@ -23,10 +23,6 @@ const (
 var defaultArtifacts = []artifact{
 	{Source: "artifacts/codex/agents/code-reviewer.toml", Dest: ".codex/agents/code-reviewer.toml", Merge: mergeNone},
 	{Source: "artifacts/docs/code_review.md", Dest: "docs/code_review.md", Merge: mergeCodeReviewDoc},
-	{Source: "artifacts/prompts/review-branch.md", Dest: "prompts/review-branch.md", Merge: mergeNone},
-	{Source: "artifacts/prompts/review-commit.md", Dest: "prompts/review-commit.md", Merge: mergeNone},
-	{Source: "artifacts/prompts/review-pr.md", Dest: "prompts/review-pr.md", Merge: mergeNone},
-	{Source: "artifacts/prompts/review-uncommitted.md", Dest: "prompts/review-uncommitted.md", Merge: mergeNone},
 }
 
 type mergeMode int
