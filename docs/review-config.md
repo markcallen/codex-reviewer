@@ -32,10 +32,17 @@ configured, branch reviews fall back to upstream, `origin/main`,
 `--profile` overrides `[review].profile`. Supported profiles are:
 
 - `standard`: concrete correctness, security, regression, test, and maintenance findings.
-- `pr-readiness`: merge readiness, including tests, docs, CI/build impact, and rollout risk.
-- `repo-policy`: repository policy conflicts, with optional policy-file context.
+- `pr-readiness`: merge readiness, including tests, docs, CI/build impact, hook/workflow setup, config/default/flag consistency, naming consistency, and rollout risk.
+- `strict`: standard defect review plus PR-readiness and repo-policy checks, with concrete actionable P3 workflow, policy, and release-readiness findings.
+- `repo-policy`: compatibility profile for repository policy conflicts, with optional policy-file context.
 
 `--policy-file` overrides `[review].policy_file`.
+
+Branch review reports are prompted to include a `Review Scope` section with the
+base, head, review type, selected profile, policy files considered, changed
+files reviewed, and checks performed. Branch prompts always tell Codex to read
+`AGENTS.md` and `docs/code_review.md` when present and to inspect changed rule
+files under `.codex/rules/**` and `.claude/rules/**`.
 
 ## Ignore globs
 

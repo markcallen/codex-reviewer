@@ -31,6 +31,7 @@ func TestLocalReviewArgsDiffReviewWithBase(t *testing.T) {
 		"exec --output-last-message codex-review/branch-review.md",
 		"Review this branch against origin/main.",
 		"git diff origin/main...HEAD",
+		"Review Scope",
 		"Diff summary",
 		"Areas checked",
 		"Areas not checked / limits",
@@ -110,13 +111,50 @@ func TestLocalReviewArgsRepoPolicyProfileAndIgnores(t *testing.T) {
 		"git diff origin/main...HEAD -- . :(exclude)dist/** :(exclude)*.lock",
 		"Repo-policy profile",
 		"Follow release policy.",
-		"Report scope metadata:",
+		"Review Scope metadata to include in the report:",
+		"default policy files to check when present: AGENTS.md, docs/code_review.md",
+		"changed policy globs to check when present: .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md",
 		"policy file: docs/review-policy.md",
 		"ignored diff globs: dist/**, *.lock",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
+	}
+}
+
+func TestLocalReviewArgsProfiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string
+		want    []string
+	}{
+		{
+			name:    "standard",
+			profile: "standard",
+			want:    []string{"Standard profile", "profile: standard"},
+		},
+		{
+			name:    "pr-readiness",
+			profile: "pr-readiness",
+			want:    []string{"PR-readiness profile", "introduced TODOs", "hook/workflow setup", "profile: pr-readiness"},
+		},
+		{
+			name:    "strict",
+			profile: "strict",
+			want:    []string{"Strict profile", "repo-policy passes", "concrete actionable P3", "profile: strict"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := localReviewArgs(LocalOptions{Base: "origin/main", Profile: tt.profile}, "codex-review/branch-review.md")
+			joined := strings.Join(args, " ")
+			for _, want := range tt.want {
+				if !strings.Contains(joined, want) {
+					t.Fatalf("args missing %q: %v", want, args)
+				}
+			}
+		})
 	}
 }
 

@@ -207,13 +207,15 @@ Profile-guided branch reviews:
 ```bash
 codex-reviewer review local \
   --base origin/main \
-  --profile repo-policy \
+  --profile strict \
   --policy-file docs/review-policy.md
 ```
 
-Supported profiles are `standard`, `pr-readiness`, and `repo-policy`.
-`repo-policy` includes policy-file context and report-scope metadata in the
-prompt.
+Supported profiles are `standard`, `pr-readiness`, `strict`, and the
+compatibility `repo-policy` profile. `strict` combines standard defect review
+with PR-readiness and repo-policy checks. Branch review prompts include
+policy-file context when provided and require a `Review Scope` section in the
+report.
 
 Advisory mode recommendation:
 
