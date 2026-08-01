@@ -120,7 +120,7 @@ func branchReviewPrompt(opts LocalOptions, instructions string) string {
 	if strings.TrimSpace(instructions) == "" {
 		return defaultBranchReviewPrompt(opts)
 	}
-	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `%s` and read relevant surrounding code before writing the report. Do not edit files.\n%s\n\n%s\n%s\n\nThe report must include a \"Review Scope\" section with base, head, review type, profile, policy files considered, changed files reviewed, and checks performed.", base, diffCommand(base, opts.Ignore), profilePrompt(opts), instructions, reviewMetadata(opts))
+	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `%s` and read relevant surrounding code before writing the report. Do not edit files.\n%s\n%s\n\n%s\n%s\n\nThe report must include a \"Review Scope\" section with base, head, review type, profile, policy files considered, changed files reviewed, and checks performed.", base, diffCommand(base, opts.Ignore), policyContextPrompt(), profilePrompt(opts), instructions, reviewMetadata(opts))
 }
 
 func defaultBranchReviewPrompt(opts LocalOptions) string {
@@ -130,10 +130,8 @@ func defaultBranchReviewPrompt(opts LocalOptions) string {
 Review scope:
 - Inspect the diff with %s and read relevant surrounding code before writing findings.
 - Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, concurrency, error handling, tests, CI/build behavior, and documentation required by user-visible changes.
-- Read repository policy context before writing findings. Always check AGENTS.md and docs/code_review.md when present. If this branch changes .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md, or other review/setup policy docs, verify the rest of the branch complies with those changed rules.
-- Check PR-readiness and developer workflow consistency: introduced TODOs and task-tracking rules, docs versus CLI behavior, hook/workflow setup completeness, config/default/flag consistency, tool and command naming consistency, and release-readiness gaps.
+%s
 - Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
-- Include concrete P3 findings when they affect developer workflow, repository policy compliance, or release readiness.
 - Do not edit files; write only the review report.
 %s
 
@@ -146,7 +144,7 @@ Required report format:
 6. Add "Findings" in priority order. If there are no findings, say "None".
 7. Add "Tests to run" with the smallest useful validation commands.
 
-Report concrete P0, P1, and P2 issues. For pr-readiness, repo-policy, and strict profiles, also report concrete actionable P3 developer-workflow or release-readiness issues. Do not invent speculative issues without an execution path.%s`, base, diffCommand(base, opts.Ignore), profilePrompt(opts), reviewMetadata(opts))
+Report concrete P0, P1, and P2 issues. For pr-readiness and strict profiles, also report concrete actionable P3 developer-workflow or release-readiness issues. For repo-policy, report concrete policy conflicts at the appropriate severity. Do not invent speculative issues without an execution path.%s`, base, diffCommand(base, opts.Ignore), policyContextPrompt(), profilePrompt(opts), reviewMetadata(opts))
 }
 
 func reviewInstructions(opts LocalOptions) string {
@@ -175,9 +173,7 @@ Review scope:
 - Read relevant surrounding code for each high-risk subsystem instead of only isolated diff hunks.
 - Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, persistence/migration risk, concurrency, error handling, tests, CI/build behavior, deployment/runtime behavior, and documentation required by user-visible changes.
 - Read repository policy context before writing findings. Always check AGENTS.md and docs/code_review.md when present. If this branch changes .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md, or other review/setup policy docs, verify the rest of the branch complies with those changed rules.
-- Check PR-readiness and developer workflow consistency: introduced TODOs and task-tracking rules, docs versus CLI behavior, hook/workflow setup completeness, config/default/flag consistency, tool and command naming consistency, and release-readiness gaps.
 - Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
-- Include concrete P3 findings when they affect developer workflow, repository policy compliance, or release readiness.
 - Do not edit files; write only the review report.
 
 Required report format:
@@ -204,7 +200,7 @@ func diffCommand(base string, ignore []string) string {
 func profilePrompt(opts LocalOptions) string {
 	switch opts.Profile {
 	case "pr-readiness":
-		return "- PR-readiness profile: assess whether this branch is ready for review or merge, including user-visible behavior, tests, docs, CI/build impact, hook/workflow setup, config/default/flag consistency, naming consistency, and rollout risk. Report concrete P3 findings when they affect developer workflow or release readiness."
+		return "- PR-readiness profile: assess whether this branch is ready for review or merge, including user-visible behavior, tests, docs, CI/build impact, introduced TODOs and task-tracking rules, hook/workflow setup, config/default/flag consistency, naming consistency, and rollout risk. Report concrete P3 findings when they affect developer workflow or release readiness."
 	case "repo-policy":
 		return "- Repo-policy profile: compare the branch against repository policy and call out concrete policy conflicts. Read AGENTS.md and docs/code_review.md when present, read the policy file when one is provided, and inspect changed .codex/rules/** and .claude/rules/** files before writing findings."
 	case "strict":
@@ -212,6 +208,10 @@ func profilePrompt(opts LocalOptions) string {
 	default:
 		return "- Standard profile: prioritize concrete defects and material review gaps."
 	}
+}
+
+func policyContextPrompt() string {
+	return "- Read repository policy context before writing findings. Always check AGENTS.md and docs/code_review.md when present. If this branch changes .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md, or other review/setup policy docs, verify the rest of the branch complies with those changed rules."
 }
 
 func reviewMetadata(opts LocalOptions) string {
@@ -227,7 +227,7 @@ func reviewMetadata(opts LocalOptions) string {
 	lines = append(lines, "- profile: "+profile)
 	lines = append(lines, "- default policy files to check when present: AGENTS.md, docs/code_review.md")
 	lines = append(lines, "- changed policy globs to check when present: .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md")
-	lines = append(lines, "- checks: correctness/security, tests/coverage, CI/release workflows, repo rule compliance, developer workflow consistency")
+	lines = append(lines, "- checks: "+reviewChecks(profile))
 	if opts.PolicyFile != "" {
 		lines = append(lines, "- policy file: "+opts.PolicyFile)
 		lines = append(lines, "Read the policy file and include any policy-specific limits in the report.")
@@ -237,6 +237,19 @@ func reviewMetadata(opts LocalOptions) string {
 		lines = append(lines, "Treat ignored globs as outside diff-review scope unless surrounding context is needed for a finding.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func reviewChecks(profile string) string {
+	switch profile {
+	case "pr-readiness":
+		return "correctness/security, tests/coverage, CI/release workflows, repo rule context, developer workflow consistency, release readiness"
+	case "repo-policy":
+		return "correctness/security, tests/coverage, CI/build behavior, repo rule compliance"
+	case "strict":
+		return "correctness/security, tests/coverage, CI/release workflows, repo rule compliance, developer workflow consistency, release readiness"
+	default:
+		return "correctness/security, tests/coverage, CI/build behavior, repo rule context"
+	}
 }
 
 func warnIgnoredScope(out io.Writer, opts LocalOptions) {

@@ -49,7 +49,15 @@ func TestLocalReviewArgsDiffReviewWithBase(t *testing.T) {
 func TestLocalReviewArgsDiffReviewWithInstructions(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"exec --output-last-message", "Review this branch against origin/main.", "git diff origin/main...HEAD", "Focus on security."} {
+	for _, want := range []string{
+		"exec --output-last-message",
+		"Review this branch against origin/main.",
+		"git diff origin/main...HEAD",
+		"Focus on security.",
+		"Review Scope",
+		"AGENTS.md and docs/code_review.md",
+		".codex/rules/**, .claude/rules/**",
+	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("args missing %q: %v", want, args)
 		}
@@ -155,6 +163,20 @@ func TestLocalReviewArgsProfiles(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLocalReviewArgsStandardProfileDoesNotIncludePRReadinessChecks(t *testing.T) {
+	args := localReviewArgs(LocalOptions{Base: "origin/main", Profile: "standard"}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, notWant := range []string{
+		"introduced TODOs",
+		"hook/workflow setup",
+		"developer workflow consistency, release readiness",
+	} {
+		if strings.Contains(joined, notWant) {
+			t.Fatalf("standard profile should not include %q: %v", notWant, args)
+		}
 	}
 }
 
