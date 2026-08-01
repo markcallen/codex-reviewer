@@ -153,64 +153,6 @@ func TestRunReviewJobWritesReportToStdout(t *testing.T) {
 	}
 }
 
-// fakeCodexWithJSONNoiseRunner simulates a codex binary that emits JSON event
-// lines to its own stdout (the --json flag behaviour) in addition to writing the
-// review report via --output-last-message.  It is used to verify that the
-// service runner does not leak JSON noise into opts.Stdout.
-type fakeCodexWithJSONNoiseRunner struct {
-	jsonNoise string
-}
-
-func (r fakeCodexWithJSONNoiseRunner) Run(_ context.Context, _, name string, args ...string) error {
-	if name != "codex" {
-		return nil
-	}
-	for i, arg := range args {
-		if arg == "--output-last-message" && i+1 < len(args) {
-			reportPath := args[i+1]
-			if err := os.WriteFile(reportPath, []byte("Approve with fixes\n\n- P1 example\n"), 0o644); err != nil {
-				return err
-			}
-			// The real codex --json also writes JSON event lines to stdout, but
-			// execCommandRunner no longer forwards child stdout to opts.Stdout, so
-			// this noise never reaches the caller.  The fake runner cannot
-			// write to the pipe; instead the test validates isolation at the
-			// execCommandRunner level via TestExecCommandRunnerRun.
-			return nil
-		}
-	}
-	return nil
-}
-
-func TestRunReviewJobStdoutContainsOnlyFinalReport(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	out := t.TempDir()
-	req := testRunnerRequest(t)
-	requestJSON, err := req.JSON()
-	if err != nil {
-		t.Fatalf("JSON() error = %v", err)
-	}
-	var stdout bytes.Buffer
-	err = RunReviewJob(context.Background(), RunnerOptions{
-		ReviewID:    "review-isolation",
-		RequestJSON: string(requestJSON),
-		Workspace:   filepath.Join(t.TempDir(), "workspace"),
-		OutputDir:   out,
-		Runner:      fakeCodexWithJSONNoiseRunner{jsonNoise: `{"type":"usage","usage":{"input_tokens":10}}`},
-		Stdout:      &stdout,
-	})
-	if err != nil {
-		t.Fatalf("RunReviewJob() error = %v", err)
-	}
-	got := stdout.String()
-	if !strings.Contains(got, "Approve with fixes") {
-		t.Fatalf("stdout missing report content: %q", got)
-	}
-	if strings.Contains(got, `"type"`) || strings.Contains(got, `"usage"`) {
-		t.Fatalf("stdout contains JSON noise that should have been discarded: %q", got)
-	}
-}
-
 func TestRunReviewJobWritesFailureMetadata(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	out := t.TempDir()
@@ -448,9 +390,8 @@ func TestExecCommandRunnerRun(t *testing.T) {
 	if err := runner.Run(context.Background(), "", "sh", "-c", "printf ok"); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	// Child stdout must NOT reach r.stdout; only the final report is written there.
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout should be empty (child stdout not forwarded), got %q", stdout.String())
+	if stdout.String() != "ok" {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
@@ -465,7 +406,9 @@ func TestExecCommandRunnerWritesRedactedDebugOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	// Child stdout is not forwarded to r.stdout; verify stderr still passes through.
+	if !strings.Contains(stdout.String(), "sk-secret123456789") {
+		t.Fatalf("stdout should preserve command output: %q", stdout.String())
+	}
 	if !strings.Contains(stderr.String(), "plain-secret") {
 		t.Fatalf("stderr should preserve command output: %q", stderr.String())
 	}
