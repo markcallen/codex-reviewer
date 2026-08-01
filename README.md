@@ -1,4 +1,4 @@
-# Codex Code Reviewer
+# Codex Reviewer
 
 [![CI](https://github.com/markcallen/codex-reviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/ci.yml)
 [![Smoke](https://github.com/markcallen/codex-reviewer/actions/workflows/smoke.yml/badge.svg)](https://github.com/markcallen/codex-reviewer/actions/workflows/smoke.yml)
