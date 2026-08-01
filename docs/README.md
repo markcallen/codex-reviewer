@@ -4,6 +4,7 @@
 - [Docker and GHCR local review](docker-ghcr.md)
 - [Kind E2E review test](kind-e2e.md)
 - [Phase 1 Kubernetes review service plan](phase1-k8s-review-service-plan.md)
+- [Repository identity](repository-identity.md)
 - [Review config and mode selection](review-config.md)
 - [Usage estimates and telemetry](usage-telemetry.md)
 - [Sources](sources.md)
