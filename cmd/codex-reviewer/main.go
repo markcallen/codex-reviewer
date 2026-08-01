@@ -427,17 +427,38 @@ func runReviewDocker(args []string) {
 	}
 
 	opts.Dir = "."
+
+	// Apply repo config with the same flag-precedence logic as runReviewLocal so
+	// that (a) --base= (explicit empty) is honored rather than overridden and
+	// (b) opts.Base is resolved before defaultReviewReport uses it.
+	ctx, stop := interruptContext()
+	defer stop()
+	repoCfg, _, err := reviewer.LoadRepoConfigForDir(ctx, opts.Dir, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load reviewer config failed: %v\n", err)
+		os.Exit(1)
+	}
+	if !flagWasSet(fs, "base") {
+		opts.Base = repoCfg.Base
+	}
+	if !flagWasSet(fs, "profile") {
+		opts.Profile = repoCfg.Profile
+	}
 	if opts.Profile == "" {
 		opts.Profile = "standard"
 	}
+	if !flagWasSet(fs, "policy-file") {
+		opts.PolicyFile = repoCfg.PolicyFile
+	}
+	opts.Ignore = repoCfg.Ignore
+	opts.Directives = repoCfg.Directives
+
 	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
 	if !opts.DryRun {
 		requireGlobalSetupCurrent()
 	}
-	ctx, stop := interruptContext()
-	defer stop()
 	if err := reviewer.RunDocker(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "docker review failed: %v\n", err)
 		os.Exit(1)
@@ -584,7 +605,15 @@ func runReviewPrePush(args []string) {
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
 	if recommend {
-		runRecommendationForBase(opts.Base)
+		base := opts.Base
+		if !flagWasSet(fs, "base") {
+			ctx, stop := interruptContext()
+			defer stop()
+			if repoCfg, _, err := reviewer.LoadRepoConfigForDir(ctx, opts.Dir, false); err == nil {
+				base = firstNonEmpty(repoCfg.PrePushBase, repoCfg.Base)
+			}
+		}
+		runRecommendationForBase(base)
 		return
 	}
 	if !opts.DryRun {

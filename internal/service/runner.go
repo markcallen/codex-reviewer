@@ -344,7 +344,11 @@ func writeMetadata(path string, metadata ReviewMetadata) error {
 func (r execCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Stdout = commandOutputWriterWithUsage(r.stdout, r.debug, "stdout", r.usage)
+	// Child stdout must not be forwarded to r.stdout (the service report channel).
+	// Codex emits JSON event/usage lines to stdout when --json is used; forwarding
+	// them would pollute the Markdown report returned to callers. The final report
+	// is written to r.stdout explicitly after RunReviewJob reads the output file.
+	cmd.Stdout = commandOutputWriterWithUsage(nil, r.debug, "stdout", r.usage)
 	cmd.Stderr = commandOutputWriterWithUsage(r.stderr, r.debug, "stderr", r.usage)
 	return cmd.Run()
 }
