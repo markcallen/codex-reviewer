@@ -62,7 +62,7 @@ The manual commands below show what the Make targets configure.
 Build and load the runner image:
 
 ```bash
-docker build -f Dockerfile.runner -t codex-reviewer:phase1 .
+docker build --build-arg VERSION=dev -f Dockerfile.runner -t codex-reviewer:phase1 .
 kind load docker-image codex-reviewer:phase1 --name codex-reviewer-e2e
 ```
 
