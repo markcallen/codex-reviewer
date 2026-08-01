@@ -153,51 +153,51 @@ func TestRunReviewJobWritesReportToStdout(t *testing.T) {
 	}
 }
 
-// fakeCodexWithJSONNoiseRunner simulates a codex binary that emits JSON event
-// lines to its own stdout (the --json flag behaviour) in addition to writing the
-// review report via --output-last-message.  It is used to verify that the
-// service runner does not leak JSON noise into opts.Stdout.
-type fakeCodexWithJSONNoiseRunner struct {
-	jsonNoise string
-}
-
-func (r fakeCodexWithJSONNoiseRunner) Run(_ context.Context, _, name string, args ...string) error {
-	if name != "codex" {
-		return nil
-	}
-	for i, arg := range args {
-		if arg == "--output-last-message" && i+1 < len(args) {
-			reportPath := args[i+1]
-			if err := os.WriteFile(reportPath, []byte("Approve with fixes\n\n- P1 example\n"), 0o644); err != nil {
-				return err
-			}
-			// The real codex --json also writes JSON event lines to stdout, but
-			// execCommandRunner no longer forwards child stdout to opts.Stdout, so
-			// this noise never reaches the caller.  The fake runner cannot
-			// write to the pipe; instead the test validates isolation at the
-			// execCommandRunner level via TestExecCommandRunnerRun.
-			return nil
-		}
-	}
-	return nil
-}
-
-func TestRunReviewJobStdoutContainsOnlyFinalReport(t *testing.T) {
+// TestRunReviewJobExecRunnerIsolatesChildStdout uses the real execCommandRunner
+// (no custom Runner provided) with fake git and codex shell scripts so that the
+// test exercises the actual exec path.  The fake codex emits JSON event lines to
+// its stdout — exactly what the real codex --json flag does — and the test
+// asserts that none of that noise reaches opts.Stdout.
+func TestRunReviewJobExecRunnerIsolatesChildStdout(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
+	binDir := t.TempDir()
 	out := t.TempDir()
+	workspace := filepath.Join(t.TempDir(), "workspace")
+
+	// Fake git: always exits 0 without doing anything.
+	writeTestScript(t, filepath.Join(binDir, "git"), "#!/bin/sh\nexit 0\n")
+
+	// Fake codex: emits JSON noise to stdout, then writes the report file.
+	writeTestScript(t, filepath.Join(binDir, "codex"), `#!/bin/sh
+printf '{"type":"usage","usage":{"input_tokens":10}}\n'
+i=0
+while [ "$i" -lt "$#" ]; do
+  i=$((i+1))
+  eval "arg=\$$i"
+  if [ "$arg" = "--output-last-message" ]; then
+    i=$((i+1))
+    eval "rp=\$$i"
+    printf 'Approve with fixes\n\n- P1 fixed\n' > "$rp"
+  fi
+done
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	req := testRunnerRequest(t)
 	requestJSON, err := req.JSON()
 	if err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
+
 	var stdout bytes.Buffer
 	err = RunReviewJob(context.Background(), RunnerOptions{
-		ReviewID:    "review-isolation",
+		ReviewID:    "exec-isolation",
 		RequestJSON: string(requestJSON),
-		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		Workspace:   workspace,
 		OutputDir:   out,
-		Runner:      fakeCodexWithJSONNoiseRunner{jsonNoise: `{"type":"usage","usage":{"input_tokens":10}}`},
-		Stdout:      &stdout,
+		// No Runner: uses real execCommandRunner so stdout isolation is exercised.
+		Stdout: &stdout,
+		Stderr: &bytes.Buffer{},
 	})
 	if err != nil {
 		t.Fatalf("RunReviewJob() error = %v", err)
@@ -207,7 +207,14 @@ func TestRunReviewJobStdoutContainsOnlyFinalReport(t *testing.T) {
 		t.Fatalf("stdout missing report content: %q", got)
 	}
 	if strings.Contains(got, `"type"`) || strings.Contains(got, `"usage"`) {
-		t.Fatalf("stdout contains JSON noise that should have been discarded: %q", got)
+		t.Fatalf("stdout contains JSON noise from child process: %q", got)
+	}
+}
+
+func writeTestScript(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatalf("writeTestScript(%s): %v", path, err)
 	}
 }
 
