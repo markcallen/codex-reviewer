@@ -210,6 +210,7 @@ docker-build-runner: build
 docker-build-sidecar:
 	docker build -f Dockerfile.egress -t "$(SIDECAR_IMAGE)" .
 
+docker-tag-runner: VERSION := $(GHCR_TAG)
 docker-tag-runner: docker-build-runner
 	docker tag "$(RUNNER_IMAGE)" "$(GHCR_RUNNER_IMAGE)"
 

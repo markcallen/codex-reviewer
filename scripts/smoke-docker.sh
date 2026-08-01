@@ -3,9 +3,10 @@ set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 IMAGE="${SMOKE_DOCKER_IMAGE:-codex-reviewer:smoke}"
+VERSION="${SMOKE_DOCKER_VERSION:-dev}"
 
 cd "$ROOT_DIR"
-docker build -f Dockerfile.runner -t "$IMAGE" .
+docker build --build-arg VERSION="$VERSION" -f Dockerfile.runner -t "$IMAGE" .
 docker run --rm \
   -v "$ROOT_DIR:/workspace" \
   -w /workspace \
