@@ -286,6 +286,71 @@ func TestRunReviewRecommendDryRun(t *testing.T) {
 	}
 }
 
+func TestRunReviewPrePushRecommendUsesPrePushBase(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test User")
+	writeFile(t, filepath.Join(dir, "README.md"), "initial\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	// Create a local "release" branch at the initial commit so it is a valid git ref.
+	runGit(t, dir, "branch", "release")
+	// Advance main with another commit so release...HEAD has a diff.
+	writeFile(t, filepath.Join(dir, "README.md"), "updated\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "update")
+
+	writeFile(t, filepath.Join(dir, ".codex-reviewer.toml"), `version = "`+version+`"
+
+[review]
+base = "main"
+
+[review.pre_push]
+base = "release"
+require_clean_tree = false
+`)
+
+	// Without --base flag the recommend path should prefer PrePushBase over review.base.
+	out := captureStdout(t, func() {
+		runReviewPrePush([]string{"--recommend"})
+	})
+	if !strings.Contains(out, "Review recommendation for release...HEAD") {
+		t.Fatalf("pre-push --recommend should use pre_push base, got:\n%s", out)
+	}
+	if strings.Contains(out, "Review recommendation for main...HEAD") {
+		t.Fatalf("pre-push --recommend should not fall back to review.base, got:\n%s", out)
+	}
+}
+
+func TestRunReviewPrePushRecommendFlagBaseOverridesConfig(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test User")
+	writeFile(t, filepath.Join(dir, "README.md"), "initial\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	// Create a local "release" branch — this is what config specifies.
+	runGit(t, dir, "branch", "release")
+
+	writeFile(t, filepath.Join(dir, ".codex-reviewer.toml"), `version = "`+version+`"
+
+[review.pre_push]
+base = "release"
+require_clean_tree = false
+`)
+
+	// Explicit --base flag should win over configured pre_push base.
+	// Use "main" as the explicit base since it exists as a local branch.
+	out := captureStdout(t, func() {
+		runReviewPrePush([]string{"--recommend", "--base", "main"})
+	})
+	if !strings.Contains(out, "Review recommendation for main...HEAD") {
+		t.Fatalf("--base flag should override config, got:\n%s", out)
+	}
+}
+
 func TestRunReviewDockerDryRun(t *testing.T) {
 	dir := initTestGitRepo(t)
 	t.Chdir(dir)

@@ -427,9 +427,6 @@ func runReviewDocker(args []string) {
 	}
 
 	opts.Dir = "."
-	if opts.Profile == "" {
-		opts.Profile = "standard"
-	}
 	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
@@ -584,7 +581,15 @@ func runReviewPrePush(args []string) {
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
 	if recommend {
-		runRecommendationForBase(opts.Base)
+		base := opts.Base
+		if !flagWasSet(fs, "base") {
+			ctx, stop := interruptContext()
+			defer stop()
+			if repoCfg, _, err := reviewer.LoadRepoConfigForDir(ctx, opts.Dir, false); err == nil {
+				base = firstNonEmpty(repoCfg.PrePushBase, repoCfg.Base)
+			}
+		}
+		runRecommendationForBase(base)
 		return
 	}
 	if !opts.DryRun {
