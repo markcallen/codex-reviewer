@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
+	"github.com/markcallen/codex-reviewer/internal/versionutil"
 )
 
 const (
@@ -235,6 +235,13 @@ func (i *installRun) installGlobalConfig() error {
 func defaultReviewerConfig(version string) string {
 	version = versionutil.ReleaseTag(version)
 	return fmt.Sprintf(`version = %q
+
+[review]
+base = ""
+ignore = []
+directives = []
+profile = "standard"
+policy_file = ""
 
 [review.pre_push]
 base = ""

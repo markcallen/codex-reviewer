@@ -11,10 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
+	"github.com/markcallen/codex-reviewer/internal/versionutil"
 )
-
-const ConfigFile = ".codex-reviewer.toml"
 
 type PrePushOptions struct {
 	Dir        string
@@ -26,14 +24,6 @@ type PrePushOptions struct {
 	DryRun     bool
 	Stdout     io.Writer
 	Stderr     io.Writer
-}
-
-type prePushConfig struct {
-	Version          string
-	Base             string
-	BlockOn          string
-	Report           string
-	RequireCleanTree bool
 }
 
 func RunPrePush(ctx context.Context, opts PrePushOptions) error {
@@ -63,7 +53,7 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 		return fmt.Errorf("%s version mismatch: installed %q, running %q; run codex-reviewer install . with the expected binary", ConfigFile, installedVersion, runningVersion)
 	}
 
-	base := firstNonEmpty(opts.Base, cfg.Base)
+	base := firstNonEmpty(opts.Base, cfg.PrePushBase, cfg.Base)
 	if base == "" {
 		base = resolveBase(ctx, repoRoot)
 	}
@@ -94,13 +84,18 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 		reportPath = filepath.Join(repoRoot, filepath.FromSlash(reportPath))
 	}
 
-	args := []string{
-		"exec", "review",
-		"--base", base,
-		"--output-last-message", reportPath,
+	reviewOpts := LocalOptions{
+		Base:       base,
+		Report:     report,
+		Ignore:     cfg.Ignore,
+		Directives: cfg.Directives,
+		Profile:    cfg.Profile,
+		PolicyFile: cfg.PolicyFile,
 	}
+	args := codexReviewArgs(reviewOpts, reportPath)
 	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: running AI code review against %s\n", base)
 	_, _ = fmt.Fprintf(opts.Stdout, "codex-reviewer: report path %s\n", reportPath)
+	warnIgnoredScope(opts.Stdout, reviewOpts)
 
 	if opts.DryRun {
 		fmt.Fprintf(opts.Stdout, "codex-reviewer: dry run: codex %s\n", strings.Join(args, " "))
@@ -132,58 +127,6 @@ func RunPrePush(ctx context.Context, opts PrePushOptions) error {
 
 	fmt.Fprintf(opts.Stdout, "codex-reviewer: review complete\n")
 	return nil
-}
-
-func loadConfig(path string) (prePushConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return prePushConfig{}, fmt.Errorf("%s is missing; run codex-reviewer install ./", ConfigFile)
-		}
-		return prePushConfig{}, fmt.Errorf("read %s: %w", ConfigFile, err)
-	}
-
-	cfg := prePushConfig{
-		BlockOn:          "block",
-		Report:           ".git/codex-review/pre-push-review.md",
-		RequireCleanTree: true,
-	}
-	section := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		line = stripComment(strings.TrimSpace(line))
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-			continue
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if section == "" && key == "version" {
-			cfg.Version = unquote(value)
-		}
-		if section == "review.pre_push" {
-			switch key {
-			case "base":
-				cfg.Base = unquote(value)
-			case "block_on":
-				cfg.BlockOn = unquote(value)
-			case "report":
-				cfg.Report = unquote(value)
-			case "require_clean_tree":
-				cfg.RequireCleanTree = value != "false"
-			}
-		}
-	}
-	if cfg.Version == "" {
-		return prePushConfig{}, fmt.Errorf("%s is missing required top-level version", ConfigFile)
-	}
-	return cfg, nil
 }
 
 func resolveBase(ctx context.Context, repoRoot string) string {

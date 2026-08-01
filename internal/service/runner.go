@@ -11,8 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+
+	"github.com/markcallen/codex-reviewer/internal/usage"
 )
 
 type RunnerOptions struct {
@@ -33,21 +36,27 @@ type CommandRunner interface {
 type execCommandRunner struct {
 	stdout io.Writer
 	stderr io.Writer
+	debug  io.Writer
+	usage  *tokenUsageCollector
 }
 
 type ReviewMetadata struct {
-	ReviewID   string `json:"review_id"`
-	Status     string `json:"status"`
-	Verdict    string `json:"verdict,omitempty"`
-	Profile    string `json:"profile"`
-	Model      string `json:"model"`
-	BaseRef    string `json:"base_ref"`
-	HeadRef    string `json:"head_ref"`
-	HeadSHA    string `json:"head_sha"`
-	ReportPath string `json:"report_path"`
-	Error      string `json:"error,omitempty"`
-	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at"`
+	ReviewID     string                 `json:"review_id"`
+	Status       string                 `json:"status"`
+	Verdict      string                 `json:"verdict,omitempty"`
+	Profile      string                 `json:"profile"`
+	Model        string                 `json:"model"`
+	TokenUsage   usage.ActualTokenUsage `json:"token_usage"`
+	BaseRef      string                 `json:"base_ref"`
+	HeadRef      string                 `json:"head_ref"`
+	HeadSHA      string                 `json:"head_sha"`
+	ReportPath   string                 `json:"report_path"`
+	DebugLogPath string                 `json:"debug_log_path"`
+	CostStatus   string                 `json:"cost_status"`
+	CostUSD      *float64               `json:"cost_usd,omitempty"`
+	Error        string                 `json:"error,omitempty"`
+	StartedAt    string                 `json:"started_at"`
+	FinishedAt   string                 `json:"finished_at"`
 }
 
 func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
@@ -65,9 +74,6 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	}
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
-	}
-	if opts.Runner == nil {
-		opts.Runner = execCommandRunner{stdout: opts.Stdout, stderr: opts.Stderr}
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now
@@ -104,6 +110,21 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
+	debugLogPath := filepath.Join(opts.OutputDir, "debug.log")
+	debugLog, err := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("create debug log: %w", err)
+	}
+	defer debugLog.Close() //nolint:errcheck
+	fmt.Fprintf(opts.Stderr, "Debug log: %s\n", debugLogPath)
+	writeDebugLog(debugLog, "run started review_id=%s workspace=%s output_dir=%s repo_url=%s base_ref=%s head_ref=%s head_sha=%s profile=%s model=%s started_at=%s\n",
+		opts.ReviewID, opts.Workspace, opts.OutputDir, req.RepoURL, req.BaseRef, req.HeadRef, req.HeadSHA, req.ProfileName, req.Profile.Model, startedAt.Format(time.RFC3339))
+	usageCollector := &tokenUsageCollector{}
+	if opts.Runner == nil {
+		opts.Runner = execCommandRunner{stdout: opts.Stdout, stderr: opts.Stderr, debug: debugLog, usage: usageCollector}
+	}
+	opts.Runner = debugCommandRunner{runner: opts.Runner, debug: debugLog, now: opts.Now}
+
 	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o600); err != nil {
 		return fmt.Errorf("write request.json: %w", err)
 	}
@@ -114,22 +135,26 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	reportPath := filepath.Join(opts.OutputDir, "review.md")
 	metadataPath := filepath.Join(opts.OutputDir, "metadata.json")
 	metadata := ReviewMetadata{
-		ReviewID:   opts.ReviewID,
-		Status:     "running",
-		Profile:    req.ProfileName,
-		Model:      req.Profile.Model,
-		BaseRef:    req.BaseRef,
-		HeadRef:    req.HeadRef,
-		HeadSHA:    req.HeadSHA,
-		ReportPath: reportPath,
-		StartedAt:  startedAt.Format(time.RFC3339),
+		ReviewID:     opts.ReviewID,
+		Status:       "running",
+		Profile:      req.ProfileName,
+		Model:        req.Profile.Model,
+		TokenUsage:   usage.ActualTokenUsage{Status: "unavailable"},
+		BaseRef:      req.BaseRef,
+		HeadRef:      req.HeadRef,
+		HeadSHA:      req.HeadSHA,
+		ReportPath:   reportPath,
+		DebugLogPath: debugLogPath,
+		CostStatus:   "unavailable",
+		StartedAt:    startedAt.Format(time.RFC3339),
 	}
 
 	runErr := runReviewCommands(ctx, opts, req, reportPath)
 	metadata.FinishedAt = opts.Now().UTC().Format(time.RFC3339)
 	if runErr != nil {
 		metadata.Status = "failed"
-		metadata.Error = runErr.Error()
+		metadata.Error = redactDebugText(runErr.Error())
+		writeDebugLog(debugLog, "run failed error=%s finished_at=%s\n", metadata.Error, metadata.FinishedAt)
 		_ = writeMetadata(metadataPath, metadata)
 		return runErr
 	}
@@ -137,12 +162,25 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	verdict, err := ParseVerdictFile(reportPath)
 	if err != nil {
 		metadata.Status = "failed"
-		metadata.Error = err.Error()
+		metadata.Error = redactDebugText(err.Error())
+		writeDebugLog(debugLog, "run failed error=%s finished_at=%s\n", metadata.Error, metadata.FinishedAt)
 		_ = writeMetadata(metadataPath, metadata)
 		return err
 	}
 	metadata.Status = "succeeded"
 	metadata.Verdict = verdict
+	if actual, ok := usageCollector.Usage(); ok {
+		metadata.TokenUsage = actual
+		cost := usage.ActualCost(actual, usage.DefaultPricing(req.Profile.Model))
+		metadata.CostStatus = "available"
+		metadata.CostUSD = &cost
+		writeDebugLog(debugLog, "token usage status=available input=%d cached_input=%d output=%d cost_usd=%.4f\n",
+			actual.InputTokens, actual.CachedInputTokens, actual.OutputTokens, cost)
+	} else {
+		metadata.TokenUsage = usage.ActualTokenUsage{Status: "unavailable"}
+		metadata.CostStatus = "unavailable"
+		writeDebugLog(debugLog, "token usage status=unavailable\n")
+	}
 	if err := writeMetadata(metadataPath, metadata); err != nil {
 		return err
 	}
@@ -150,6 +188,7 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err != nil {
 		return fmt.Errorf("read review report for stdout: %w", err)
 	}
+	writeDebugLog(debugLog, "run succeeded verdict=%s finished_at=%s\n", verdict, metadata.FinishedAt)
 	_, _ = opts.Stdout.Write(reportData)
 	return nil
 }
@@ -183,6 +222,7 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 	}
 	args := []string{
 		"exec", "review",
+		"--json",
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
@@ -304,9 +344,107 @@ func writeMetadata(path string, metadata ReviewMetadata) error {
 func (r execCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Stdout = r.stdout
-	cmd.Stderr = r.stderr
+	cmd.Stdout = commandOutputWriterWithUsage(r.stdout, r.debug, "stdout", r.usage)
+	cmd.Stderr = commandOutputWriterWithUsage(r.stderr, r.debug, "stderr", r.usage)
 	return cmd.Run()
+}
+
+type debugCommandRunner struct {
+	runner CommandRunner
+	debug  io.Writer
+	now    func() time.Time
+}
+
+func (r debugCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
+	startedAt := r.now().UTC()
+	writeDebugLog(r.debug, "command start at=%s dir=%s argv=%s\n", startedAt.Format(time.RFC3339), dir, commandString(name, args))
+	err := r.runner.Run(ctx, dir, name, args...)
+	finishedAt := r.now().UTC()
+	if err != nil {
+		writeDebugLog(r.debug, "command failed at=%s duration=%s error=%s\n", finishedAt.Format(time.RFC3339), finishedAt.Sub(startedAt), err.Error())
+		return err
+	}
+	writeDebugLog(r.debug, "command finished at=%s duration=%s\n", finishedAt.Format(time.RFC3339), finishedAt.Sub(startedAt))
+	return nil
+}
+
+func commandOutputWriterWithUsage(dst, debug io.Writer, stream string, collector *tokenUsageCollector) io.Writer {
+	writers := make([]io.Writer, 0, 3)
+	if dst != nil {
+		writers = append(writers, dst)
+	}
+	if collector != nil {
+		writers = append(writers, collector)
+	}
+	if debug == nil {
+		if len(writers) == 0 {
+			return io.Discard
+		}
+		return io.MultiWriter(writers...)
+	}
+	writers = append(writers, redactingDebugWriter{dst: debug, prefix: stream + ": "})
+	return io.MultiWriter(writers...)
+}
+
+type redactingDebugWriter struct {
+	dst    io.Writer
+	prefix string
+}
+
+func (w redactingDebugWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		_, err := fmt.Fprint(w.dst, w.prefix, redactDebugText(string(p)))
+		if err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+func commandString(name string, args []string) string {
+	parts := append([]string{name}, args...)
+	return redactDebugText(strings.Join(parts, " "))
+}
+
+func writeDebugLog(w io.Writer, format string, args ...any) {
+	if w == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, redactDebugText(format), redactDebugArgs(args)...)
+}
+
+func redactDebugArgs(args []any) []any {
+	redacted := make([]any, len(args))
+	for i, arg := range args {
+		switch v := arg.(type) {
+		case string:
+			redacted[i] = redactDebugText(v)
+		default:
+			redacted[i] = arg
+		}
+	}
+	return redacted
+}
+
+var debugRedactionRules = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{regexp.MustCompile(`(?i)(authorization\s*[:=]\s*(?:bearer|basic|token)?\s*)[A-Za-z0-9._~+/=-]+`), `${1}[REDACTED]`},
+	{regexp.MustCompile(`(?i)(x-api-key\s*[:=]\s*)[A-Za-z0-9._~+/=-]+`), `${1}[REDACTED]`},
+	{regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|passwd|pwd)\s*[:=]\s*)[^\s"'` + "`" + `,;]+`), `${1}[REDACTED]`},
+	{regexp.MustCompile(`(?i)("(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|authorization)"\s*:\s*")[^"]+(")`), `${1}[REDACTED]${2}`},
+	{regexp.MustCompile(`(?i)(x-access-token:)[^@/\s]+(@github\.com)`), `${1}[REDACTED]${2}`},
+	{regexp.MustCompile(`(?i)(https?://)[^/\s:@]+:[^@\s/]+@`), `${1}[REDACTED]@`},
+	{regexp.MustCompile(`(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|gh[opsu]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b`), `[REDACTED]`},
+}
+
+func redactDebugText(value string) string {
+	redacted := value
+	for _, rule := range debugRedactionRules {
+		redacted = rule.pattern.ReplaceAllString(redacted, rule.replacement)
+	}
+	return redacted
 }
 
 func DecodeReviewRequest(data []byte) (ReviewRequest, error) {

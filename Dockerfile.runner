@@ -1,6 +1,7 @@
 FROM golang:1.25-bookworm AS build
 
 WORKDIR /src
+ARG VERSION=dev
 COPY go.mod ./
 COPY . .
 RUN go build -ldflags "-X main.version=${VERSION:-dev}" -o /out/codex-reviewer ./cmd/codex-reviewer

@@ -56,8 +56,65 @@ require_clean_tree = false
 
 	out := stdout.String()
 	assertContains(t, out, "running AI code review against origin/main")
-	assertContains(t, out, "dry run: codex exec review --base origin/main")
+	assertContains(t, out, "dry run: codex exec --output-last-message")
+	assertContains(t, out, "Review this branch against origin/main")
 	assertContains(t, out, filepath.Join(dir, ".git/codex-review/custom.md"))
+}
+
+func TestLoadRepoConfigReviewSettings(t *testing.T) {
+	dir := initGitRepo(t)
+	writeReviewerConfig(t, dir, `version = "v1.2.3"
+
+[review]
+base = "origin/main"
+ignore = [
+  "dist/**",
+  "*.lock",
+]
+directives = [
+  "Focus auth.",
+  "Check docs.",
+]
+profile = "repo-policy"
+policy_file = "docs/policy.md"
+
+[review.pre_push]
+base = "origin/release"
+block_on = "never"
+require_clean_tree = false
+`)
+
+	cfg, found, err := LoadRepoConfig(dir, true)
+	if err != nil {
+		t.Fatalf("LoadRepoConfig() error = %v", err)
+	}
+	if !found {
+		t.Fatal("LoadRepoConfig() found = false")
+	}
+	if cfg.Base != "origin/main" || cfg.PrePushBase != "origin/release" || cfg.Profile != "repo-policy" || cfg.PolicyFile != "docs/policy.md" {
+		t.Fatalf("config = %+v", cfg)
+	}
+	if strings.Join(cfg.Ignore, ",") != "dist/**,*.lock" {
+		t.Fatalf("ignore = %#v", cfg.Ignore)
+	}
+	if strings.Join(cfg.Directives, "|") != "Focus auth.|Check docs." {
+		t.Fatalf("directives = %#v", cfg.Directives)
+	}
+	if cfg.BlockOn != "never" || cfg.RequireCleanTree {
+		t.Fatalf("pre-push config = %+v", cfg)
+	}
+}
+
+func TestIgnoredPathMatching(t *testing.T) {
+	ignore := []string{"dist/**", "*.lock"}
+	for _, path := range []string{"dist/app.js", "nested/package.lock"} {
+		if !matchesIgnoredPath(path, ignore) {
+			t.Fatalf("matchesIgnoredPath(%q) = false", path)
+		}
+	}
+	if matchesIgnoredPath("src/app.go", ignore) {
+		t.Fatal("matchesIgnoredPath(src/app.go) = true")
+	}
 }
 
 func TestRunPrePushComparesReleaseTags(t *testing.T) {

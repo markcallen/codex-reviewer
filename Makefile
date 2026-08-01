@@ -205,7 +205,7 @@ kind-secrets: kind-namespace
 			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 docker-build-runner: build
-	docker build -f Dockerfile.runner -t "$(RUNNER_IMAGE)" .
+	docker build --build-arg VERSION="$(VERSION)" -f Dockerfile.runner -t "$(RUNNER_IMAGE)" .
 
 docker-build-sidecar:
 	docker build -f Dockerfile.egress -t "$(SIDECAR_IMAGE)" .

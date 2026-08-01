@@ -13,12 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/codexconfig"
-	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
-	"github.com/everydaydevops/codex-code-reviewer/internal/reviewer"
-	"github.com/everydaydevops/codex-code-reviewer/internal/service"
-	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
-	"github.com/everydaydevops/codex-code-reviewer/internal/workflow"
+	"github.com/markcallen/codex-reviewer/internal/codexconfig"
+	"github.com/markcallen/codex-reviewer/internal/installer"
+	"github.com/markcallen/codex-reviewer/internal/reviewer"
+	"github.com/markcallen/codex-reviewer/internal/service"
+	"github.com/markcallen/codex-reviewer/internal/versionutil"
+	"github.com/markcallen/codex-reviewer/internal/workflow"
 )
 
 var version = "dev"
@@ -119,12 +119,43 @@ func runService(args []string) {
 		runServiceJobManifest(args[1:])
 	case "runner":
 		runServiceRunner(args[1:])
+	case "telemetry":
+		runServiceTelemetry(args[1:])
 	case "-h", "--help", "help":
 		serviceUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown service command: %s\n\n", args[0])
 		serviceUsage()
 		os.Exit(2)
+	}
+}
+
+func runServiceTelemetry(args []string) {
+	var listen string
+	var token string
+	var maxBodyBytes int64
+	fs := flag.NewFlagSet("service telemetry", flag.ExitOnError)
+	fs.StringVar(&listen, "listen", ":8081", "HTTP listen address")
+	fs.StringVar(&token, "token", os.Getenv("CODEX_REVIEWER_TELEMETRY_TOKEN"), "bearer token required for telemetry ingestion and queries; defaults to CODEX_REVIEWER_TELEMETRY_TOKEN")
+	fs.Int64Var(&maxBodyBytes, "max-body-bytes", 256<<10, "maximum telemetry event payload size")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service telemetry [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	server, err := service.NewTelemetryServer(service.TelemetryOptions{Token: token, MaxBodyBytes: maxBodyBytes})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configure telemetry service failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintf(os.Stdout, "codex-reviewer telemetry: listening on %s\n", listen)
+	if err := listenAndServe(listen, server.Handler()); err != nil {
+		fmt.Fprintf(os.Stderr, "telemetry service failed: %v\n", err)
+		os.Exit(1)
 	}
 }
 
@@ -295,7 +326,7 @@ func runServiceSubmit(args []string) {
 		os.Exit(1)
 	}
 	if dryRun {
-		data, err := req.JSON()
+		data, err := service.DryRunReviewRequestJSON(context.Background(), opts.Dir, req)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "encode review request failed: %v\n", err)
 			os.Exit(1)
@@ -358,6 +389,8 @@ func runReview(args []string) {
 		runReviewDocker(args[1:])
 	case "pre-push":
 		runReviewPrePush(args[1:])
+	case "recommend":
+		runReviewRecommend(args[1:])
 	case "-h", "--help", "help":
 		reviewUsage()
 	default:
@@ -378,6 +411,8 @@ func runReviewDocker(args []string) {
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
 	fs.StringVar(&report, "report", "", "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.StringVar(&opts.Profile, "profile", "", "review profile: standard, pr-readiness, or repo-policy")
+	fs.StringVar(&opts.PolicyFile, "policy-file", "", "repository policy file to include in profile context")
 	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the docker command without running it")
@@ -392,6 +427,9 @@ func runReviewDocker(args []string) {
 	}
 
 	opts.Dir = "."
+	if opts.Profile == "" {
+		opts.Profile = "standard"
+	}
 	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
@@ -423,12 +461,16 @@ func runReviewLocal(args []string) {
 	cfg := codexconfig.LoadReviewerConfig()
 	var opts reviewer.LocalOptions
 	var report string
+	var recommend bool
 	fs := flag.NewFlagSet("review local", flag.ExitOnError)
 	fs.StringVar(&opts.Base, "base", "", "optional base branch/ref for a diff review; omit for full repository review")
 	fs.StringVar(&report, "report", "", "review report path")
 	fs.StringVar(&opts.Instructions, "instructions", "", "custom review instructions")
+	fs.StringVar(&opts.Profile, "profile", "", "review profile: standard, pr-readiness, or repo-policy")
+	fs.StringVar(&opts.PolicyFile, "policy-file", "", "repository policy file to include in profile context")
 	fs.BoolVar(&opts.Structured, "structured", false, "require structured review output with subsystem coverage and limits")
 	fs.BoolVar(&opts.Full, "full", false, "review the full repository even when --base is set")
+	fs.BoolVar(&recommend, "recommend", false, "print an advisory review mode recommendation instead of running Codex")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex command without running it")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review local [flags]\n\n")
@@ -441,6 +483,27 @@ func runReviewLocal(args []string) {
 	}
 
 	opts.Dir = "."
+	repoCfg, _, err := reviewer.LoadRepoConfigForDir(context.Background(), opts.Dir, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load reviewer config failed: %v\n", err)
+		os.Exit(1)
+	}
+	if !flagWasSet(fs, "base") {
+		opts.Base = repoCfg.Base
+	}
+	if !flagWasSet(fs, "profile") {
+		opts.Profile = repoCfg.Profile
+	}
+	if opts.Profile == "" {
+		opts.Profile = "standard"
+	}
+	if !flagWasSet(fs, "policy-file") {
+		opts.PolicyFile = repoCfg.PolicyFile
+	}
+	if recommend {
+		runRecommendationForBase(opts.Base)
+		return
+	}
 	opts.Report = defaultReviewReport(report, cfg.Report, opts.Base, opts.Full)
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
@@ -451,6 +514,30 @@ func runReviewLocal(args []string) {
 	defer stop()
 	if err := reviewer.RunLocal(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "local review failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runReviewRecommend(args []string) {
+	var opts reviewer.RecommendOptions
+	fs := flag.NewFlagSet("review recommend", flag.ExitOnError)
+	fs.StringVar(&opts.Base, "base", "", "base branch/ref to summarize; defaults to config, upstream, origin/main, origin/master, then main")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review recommend [flags]\n\n")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+
+	opts.Dir = "."
+	opts.Stdout = os.Stdout
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := reviewer.RunRecommend(ctx, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "review recommendation failed: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -474,11 +561,13 @@ func requireGlobalSetupCurrent() {
 
 func runReviewPrePush(args []string) {
 	var opts reviewer.PrePushOptions
+	var recommend bool
 	fs := flag.NewFlagSet("review pre-push", flag.ExitOnError)
 	fs.StringVar(&opts.Base, "base", "", "base branch/ref to review against; defaults to config, upstream, origin/main, origin/master, then main")
 	fs.StringVar(&opts.Report, "report", "", "review report path; defaults to config")
 	fs.StringVar(&opts.BlockOn, "block-on", "", "when to block push: block or never; defaults to config")
 	fs.BoolVar(&opts.AllowDirty, "allow-dirty", false, "allow review to run with a dirty working tree")
+	fs.BoolVar(&recommend, "recommend", false, "print an advisory review mode recommendation instead of running Codex")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the codex review command without running it")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer review pre-push [flags]\n\n")
@@ -494,6 +583,10 @@ func runReviewPrePush(args []string) {
 	opts.Version = version
 	opts.Stdout = os.Stdout
 	opts.Stderr = os.Stderr
+	if recommend {
+		runRecommendationForBase(opts.Base)
+		return
+	}
 	if !opts.DryRun {
 		requireGlobalSetupCurrent()
 	}
@@ -503,6 +596,26 @@ func runReviewPrePush(args []string) {
 		fmt.Fprintf(os.Stderr, "pre-push review failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runRecommendationForBase(base string) {
+	opts := reviewer.RecommendOptions{Dir: ".", Base: base, Stdout: os.Stdout}
+	ctx, stop := interruptContext()
+	defer stop()
+	if err := reviewer.RunRecommend(ctx, opts); err != nil {
+		fmt.Fprintf(os.Stderr, "review recommendation failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	wasSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			wasSet = true
+		}
+	})
+	return wasSet
 }
 
 func runInstall(args []string) {
@@ -740,10 +853,12 @@ Usage:
   codex-reviewer review local [flags]
   codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
+  codex-reviewer review recommend [flags]
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
+  codex-reviewer service telemetry [flags]
   codex-reviewer workflow run [flags]
   codex-reviewer version
 
@@ -757,6 +872,7 @@ Usage:
   codex-reviewer review local [flags]
   codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
+  codex-reviewer review recommend [flags]
 
 `)
 }
@@ -778,6 +894,7 @@ Usage:
   codex-reviewer service submit [flags]
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
+  codex-reviewer service telemetry [flags]
 
 `)
 }

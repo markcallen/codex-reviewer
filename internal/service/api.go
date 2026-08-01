@@ -18,6 +18,7 @@ type APIOptions struct {
 	JobOptions JobOptions
 	Applier    JobApplier
 	Reports    ReportReader
+	Telemetry  TelemetryRecorder
 }
 
 type JobApplier interface {
@@ -26,6 +27,10 @@ type JobApplier interface {
 
 type ReportReader interface {
 	ReadReport(ctx context.Context, namespace, jobName string) ([]byte, error)
+}
+
+type TelemetryRecorder interface {
+	Ingest(event ReviewTelemetryEvent) (ReviewTelemetryEvent, error)
 }
 
 type KubectlApplier struct{}
@@ -129,6 +134,19 @@ func (s *APIServer) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusInternalServerError, resp)
 		return
+	}
+	if s.opts.Telemetry != nil {
+		event := ReviewTelemetryEvent{
+			SchemaVersion: ReviewTelemetryEventSchemaV1,
+			ReviewID:      id,
+			Status:        "submitted",
+			Profile:       req.ProfileName,
+			Model:         req.Profile.Model,
+			BaseRef:       req.BaseRef,
+			HeadRef:       req.HeadRef,
+			HeadSHA:       req.HeadSHA,
+		}
+		go func() { _, _ = s.opts.Telemetry.Ingest(event) }()
 	}
 	writeJSON(w, http.StatusAccepted, resp)
 }

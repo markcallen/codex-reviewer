@@ -22,11 +22,15 @@ type fakeCommandRunner struct {
 	commands   []recordedCommand
 	reportPath string
 	failName   string
+	failErr    error
 }
 
 func (r *fakeCommandRunner) Run(_ context.Context, dir, name string, args ...string) error {
 	r.commands = append(r.commands, recordedCommand{Dir: dir, Name: name, Args: append([]string(nil), args...)})
 	if name == r.failName {
+		if r.failErr != nil {
+			return r.failErr
+		}
 		return errFakeCommand
 	}
 	if name == "codex" {
@@ -61,6 +65,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 	}
 	runner := &fakeCommandRunner{}
 	now := time.Date(2026, 7, 25, 1, 2, 3, 0, time.UTC)
+	var stderr bytes.Buffer
 
 	err = RunReviewJob(context.Background(), RunnerOptions{
 		ReviewID:    "review-1",
@@ -68,6 +73,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		Workspace:   workspace,
 		OutputDir:   out,
 		Runner:      runner,
+		Stderr:      &stderr,
 		Now:         func() time.Time { return now },
 	})
 	if err != nil {
@@ -97,6 +103,28 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 	}
 	if metadata.Profile != "standard" || metadata.Model != "gpt-5.5" {
 		t.Fatalf("metadata profile/model = %#v", metadata)
+	}
+	if metadata.TokenUsage.Status != "unavailable" || metadata.CostStatus != "unavailable" {
+		t.Fatalf("metadata usage/cost availability = %#v", metadata)
+	}
+	debugLogPath := filepath.Join(out, "debug.log")
+	if metadata.DebugLogPath != debugLogPath {
+		t.Fatalf("metadata.DebugLogPath = %q, want %q", metadata.DebugLogPath, debugLogPath)
+	}
+	if !strings.Contains(stderr.String(), "Debug log: "+debugLogPath) {
+		t.Fatalf("stderr missing debug log path: %q", stderr.String())
+	}
+	debugLog := readFile(t, debugLogPath)
+	for _, want := range []string{
+		"run started review_id=review-1",
+		"repo_url=git@github.com:org/repo.git",
+		"command start",
+		"argv=codex exec review",
+		"run succeeded verdict=approve_with_fixes",
+	} {
+		if !strings.Contains(debugLog, want) {
+			t.Fatalf("debug log missing %q:\n%s", want, debugLog)
+		}
 	}
 }
 
@@ -149,6 +177,42 @@ func TestRunReviewJobWritesFailureMetadata(t *testing.T) {
 	}
 	if !strings.Contains(metadata.Error, "clone repository") {
 		t.Fatalf("metadata.Error = %q", metadata.Error)
+	}
+	if metadata.DebugLogPath != filepath.Join(out, "debug.log") {
+		t.Fatalf("metadata.DebugLogPath = %q", metadata.DebugLogPath)
+	}
+}
+
+func TestRunReviewJobRedactsFailureMetadataAndDebugLog(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	out := t.TempDir()
+	req := testRunnerRequest(t)
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   out,
+		Runner: &fakeCommandRunner{
+			failName: "git",
+			failErr:  &fakeError{message: "Authorization: Bearer sk-secret123456789 api_key=plain-secret"},
+		},
+	})
+	if err == nil {
+		t.Fatal("RunReviewJob() error = nil, want failure")
+	}
+	metadata := readMetadata(t, filepath.Join(out, "metadata.json"))
+	debugLog := readFile(t, metadata.DebugLogPath)
+	for _, content := range []string{metadata.Error, debugLog} {
+		if strings.Contains(content, "sk-secret123456789") || strings.Contains(content, "plain-secret") {
+			t.Fatalf("content contains unredacted secret:\n%s", content)
+		}
+		if !strings.Contains(content, "[REDACTED]") {
+			t.Fatalf("content missing redaction marker:\n%s", content)
+		}
 	}
 }
 
@@ -331,6 +395,52 @@ func TestExecCommandRunnerRun(t *testing.T) {
 	}
 }
 
+func TestExecCommandRunnerWritesRedactedDebugOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var debug bytes.Buffer
+	collector := &tokenUsageCollector{}
+	runner := execCommandRunner{stdout: &stdout, stderr: &stderr, debug: &debug, usage: collector}
+
+	err := runner.Run(context.Background(), "", "sh", "-c", "printf 'Authorization: Bearer sk-secret123456789\\n'; printf '{\"usage\":{\"input_tokens\":12,\"cached_input_tokens\":3,\"output_tokens\":7}}\\n'; printf 'api_key=plain-secret\\n' >&2")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "sk-secret123456789") {
+		t.Fatalf("stdout should preserve command output: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "plain-secret") {
+		t.Fatalf("stderr should preserve command output: %q", stderr.String())
+	}
+	debugLog := debug.String()
+	if strings.Contains(debugLog, "sk-secret123456789") || strings.Contains(debugLog, "plain-secret") {
+		t.Fatalf("debug log contains unredacted secret:\n%s", debugLog)
+	}
+	if !strings.Contains(debugLog, "stdout: Authorization: Bearer [REDACTED]") || !strings.Contains(debugLog, "stderr: api_key=[REDACTED]") {
+		t.Fatalf("debug log missing redacted command output:\n%s", debugLog)
+	}
+	actual, ok := collector.Usage()
+	if !ok {
+		t.Fatal("collector did not parse usage")
+	}
+	if actual.Status != "available" || actual.InputTokens != 12 || actual.CachedInputTokens != 3 || actual.OutputTokens != 7 {
+		t.Fatalf("actual usage = %#v", actual)
+	}
+}
+
+func TestRedactDebugTextRedactsObviousCredentials(t *testing.T) {
+	input := `Authorization: Bearer sk-secret123456789 api_key=plain-secret "password":"json-secret" https://user:token@example.com/repo.git`
+	got := redactDebugText(input)
+	for _, secret := range []string{"sk-secret123456789", "plain-secret", "json-secret", "user:token"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("redacted text contains %q: %s", secret, got)
+		}
+	}
+	if strings.Count(got, "[REDACTED]") < 4 {
+		t.Fatalf("redacted text missing markers: %s", got)
+	}
+}
+
 func commandIndex(commands []recordedCommand, name string) int {
 	for i, command := range commands {
 		if command.Name == name {
@@ -385,4 +495,13 @@ func readMetadata(t *testing.T, path string) ReviewMetadata {
 		t.Fatalf("Unmarshal metadata error = %v\n%s", err, data)
 	}
 	return metadata
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	return string(data)
 }

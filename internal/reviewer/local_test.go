@@ -97,6 +97,29 @@ func TestLocalReviewArgsStructuredDiffReviewWithInstructions(t *testing.T) {
 	}
 }
 
+func TestLocalReviewArgsRepoPolicyProfileAndIgnores(t *testing.T) {
+	args := localReviewArgs(LocalOptions{
+		Base:       "origin/main",
+		Ignore:     []string{"dist/**", "*.lock"},
+		Directives: []string{"Follow release policy."},
+		Profile:    "repo-policy",
+		PolicyFile: "docs/review-policy.md",
+	}, "codex-review/branch-review.md")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"git diff origin/main...HEAD -- . :(exclude)dist/** :(exclude)*.lock",
+		"Repo-policy profile",
+		"Follow release policy.",
+		"Report scope metadata:",
+		"policy file: docs/review-policy.md",
+		"ignored diff globs: dist/**, *.lock",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("args missing %q: %v", want, args)
+		}
+	}
+}
+
 func TestLocalReviewArgsDiffReviewWithInstructionsNoEdit(t *testing.T) {
 	args := localReviewArgs(LocalOptions{Base: "origin/main", Instructions: "Focus on security."}, "codex-review/branch-review.md")
 	joined := strings.Join(args, " ")

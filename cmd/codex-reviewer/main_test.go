@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/installer"
+	"github.com/markcallen/codex-reviewer/internal/installer"
 )
 
 func TestRunWorkflowRunDryRun(t *testing.T) {
@@ -111,6 +113,41 @@ func TestRunServiceSubmitDryRunWritesOutput(t *testing.T) {
 			t.Fatalf("request missing %q:\n%s", want, data)
 		}
 	}
+	if !strings.Contains(data, `"usage_estimate"`) || !strings.Contains(data, `"cost_estimate"`) {
+		t.Fatalf("request missing usage estimate:\n%s", data)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+		t.Fatalf("dry-run output is not JSON: %v\n%s", err, data)
+	}
+	if decoded["repo_url"] == nil || decoded["usage_estimate"] == nil {
+		t.Fatalf("dry-run output missing request fields or estimate: %#v", decoded)
+	}
+}
+
+func TestRunServiceTelemetryConfiguresServer(t *testing.T) {
+	oldListenAndServe := listenAndServe
+	t.Cleanup(func() { listenAndServe = oldListenAndServe })
+	called := false
+	listenAndServe = func(addr string, handler http.Handler) error {
+		called = true
+		if addr != "127.0.0.1:0" {
+			t.Fatalf("addr = %q", addr)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/telemetry/v1/spend", nil)
+		req.Header.Set("Authorization", "Bearer test-token")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("spend status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		return nil
+	}
+
+	runServiceTelemetry([]string{"--listen", "127.0.0.1:0", "--token", "test-token"})
+	if !called {
+		t.Fatal("listenAndServe was not called")
+	}
 }
 
 func TestRunServiceSubmitWaitWritesReport(t *testing.T) {
@@ -191,6 +228,62 @@ func TestRunReviewLocalDryRun(t *testing.T) {
 		"--base", "origin/main",
 		"--report", "codex-review/wrapper.md",
 	})
+}
+
+func TestRunReviewLocalUsesConfigBaseAndFlagOverride(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+	writeFile(t, filepath.Join(dir, ".codex-reviewer.toml"), `version = "`+version+`"
+
+[review]
+base = "origin/config"
+profile = "pr-readiness"
+`)
+
+	out := captureStdout(t, func() {
+		runReviewLocal([]string{"--dry-run"})
+	})
+	if !strings.Contains(out, "Review this branch against origin/config") {
+		t.Fatalf("config base not used:\n%s", out)
+	}
+	if !strings.Contains(out, "profile: pr-readiness") {
+		t.Fatalf("config profile not used:\n%s", out)
+	}
+
+	out = captureStdout(t, func() {
+		runReviewLocal([]string{"--dry-run", "--base", "origin/flag", "--profile", "standard"})
+	})
+	if !strings.Contains(out, "Review this branch against origin/flag") {
+		t.Fatalf("flag base not used:\n%s", out)
+	}
+	if !strings.Contains(out, "profile: standard") {
+		t.Fatalf("flag profile not used:\n%s", out)
+	}
+}
+
+func TestRunReviewRecommendDryRun(t *testing.T) {
+	dir := initTestGitRepo(t)
+	t.Chdir(dir)
+	runGit(t, dir, "config", "user.email", "test@example.com")
+	runGit(t, dir, "config", "user.name", "Test User")
+	writeFile(t, filepath.Join(dir, "README.md"), "initial\n")
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "initial")
+	writeFile(t, filepath.Join(dir, "README.md"), "changed\n")
+
+	out := captureStdout(t, func() {
+		runReviewRecommend([]string{"--base", "main"})
+	})
+	if !strings.Contains(out, "Recommended mode:") {
+		t.Fatalf("recommend output missing mode:\n%s", out)
+	}
+
+	out = captureStdout(t, func() {
+		runReviewLocal([]string{"--recommend", "--base", "main"})
+	})
+	if !strings.Contains(out, "Review recommendation for main...HEAD") {
+		t.Fatalf("local recommend flag output missing summary:\n%s", out)
+	}
 }
 
 func TestRunReviewDockerDryRun(t *testing.T) {
@@ -276,7 +369,8 @@ printf 'CODEX_API_KEY=%s\nGITHUB_TOKEN=%s\n' "$CODEX_API_KEY" "$GITHUB_TOKEN" >>
 		"codex\nexec\n",
 		"--sandbox\ndanger-full-access\n",
 		"--output-last-message\ncodex-review/test.md\n",
-		"Review this branch against origin/main. Inspect the diff with `git diff origin/main...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n\nfocus on docker\n",
+		"Review this branch against origin/main. Inspect the diff with `git diff origin/main...HEAD` and read relevant surrounding code before writing the report. Do not edit files.\n",
+		"profile: standard\n",
 		"focus on docker\n",
 		"CODEX_API_KEY=test-codex-key\n",
 		"GITHUB_TOKEN=test-github-token\n",
@@ -413,6 +507,27 @@ func readFile(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatalf("ReadFile(%s) error = %v", path, err)
 	}
+	return string(data)
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	oldStdout := os.Stdout
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Pipe() error = %v", err)
+	}
+	os.Stdout = write
+	fn()
+	if err := write.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	os.Stdout = oldStdout
+	data, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatalf("ReadAll(stdout) error = %v", err)
+	}
+	_ = read.Close()
 	return string(data)
 }
 

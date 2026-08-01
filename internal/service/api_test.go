@@ -23,6 +23,10 @@ type fakeReportReader struct {
 	err    error
 }
 
+type fakeTelemetryRecorder struct {
+	events chan ReviewTelemetryEvent
+}
+
 func (a *fakeApplier) Apply(_ context.Context, manifest []byte) error {
 	a.manifest = append([]byte(nil), manifest...)
 	return a.err
@@ -30,6 +34,11 @@ func (a *fakeApplier) Apply(_ context.Context, manifest []byte) error {
 
 func (r fakeReportReader) ReadReport(_ context.Context, _, _ string) ([]byte, error) {
 	return r.report, r.err
+}
+
+func (r fakeTelemetryRecorder) Ingest(event ReviewTelemetryEvent) (ReviewTelemetryEvent, error) {
+	r.events <- event
+	return event, nil
 }
 
 func TestAPIServerCreatesReviewJob(t *testing.T) {
@@ -81,6 +90,39 @@ func TestAPIServerCreatesReviewJob(t *testing.T) {
 	}
 	if reportRec.Body.String() != "No blocking findings\n" {
 		t.Fatalf("report body = %q", reportRec.Body.String())
+	}
+}
+
+func TestAPIServerRecordsSubmittedTelemetryWithoutBlocking(t *testing.T) {
+	recorder := fakeTelemetryRecorder{events: make(chan ReviewTelemetryEvent, 1)}
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+		Applier:   &fakeApplier{},
+		Telemetry: recorder,
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+	body, err := testReviewRequest(t).JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/reviews", strings.NewReader(string(body))))
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	select {
+	case event := <-recorder.events:
+		if event.Status != "submitted" || event.Profile != "standard" || event.Model == "" {
+			t.Fatalf("event = %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for telemetry event")
 	}
 }
 

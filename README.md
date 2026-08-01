@@ -72,6 +72,19 @@ Structured review mode asks Codex to summarize the diff, list areas checked,
 list areas not checked or not deeply verified, report all concrete P0-P2
 findings, and include the smallest useful validation commands.
 
+To get an advisory mode recommendation before spending tokens:
+
+```bash
+bin/codex-reviewer review recommend --base origin/main
+```
+
+The recommendation is local-only and deterministic. It summarizes changed files,
+approximate diff size, simple risk signals, a recommended mode
+(`native`, `structured`, `full`, or `pre-push`), reasons, and an approximate
+token range. You can also use `review local --recommend` or
+`review pre-push --recommend` to print the same advisory output from those
+workflows without invoking Codex.
+
 To run the same app in an isolated local Docker container, build the image:
 
 ```bash
@@ -242,7 +255,7 @@ The Go CLI embeds all artifacts required for project installation, so the built 
 It is intentionally non-destructive:
 
 - Missing files are created.
-- `.codex-reviewer.toml` is created on first install with the installed CLI version and pre-push review defaults; later installs refresh only the recorded version.
+- `.codex-reviewer.toml` is created on first install with the installed CLI version, repo review defaults, and pre-push review defaults; later installs refresh only the recorded version.
 - Existing `.codex/config.toml` files are merged with only the missing review-related settings.
 - Existing `AGENTS.md` and `docs/code_review.md` files are extended with marked managed sections.
 - Existing agent and prompt files that differ from the bundled artifacts are kept unchanged and reported as warnings.
@@ -265,7 +278,50 @@ codex-reviewer review pre-push
 
 The command reads `.codex-reviewer.toml`, verifies the installed version matches
 the running `codex-reviewer` binary, requires a clean working tree by default,
-runs `codex exec review`, and writes the report under `.git/codex-review/`.
+runs a prompt-based branch review, and writes the report under
+`.git/codex-review/`.
+
+## Repo review config
+
+`.codex-reviewer.toml` can set shared review defaults:
+
+```toml
+version = "v1.2.3"
+
+[review]
+base = "origin/main"
+ignore = ["dist/**", "*.lock"]
+directives = [
+  "Check public API compatibility.",
+  "Treat missing behavior tests as a blocking finding.",
+]
+profile = "pr-readiness"
+policy_file = "docs/review-policy.md"
+
+[review.pre_push]
+base = ""
+block_on = "block"
+report = ".git/codex-review/pre-push-review.md"
+require_clean_tree = true
+```
+
+Explicit CLI flags win over config. For example, `--base release/1.2` overrides
+`[review].base`, and `--profile standard` overrides `[review].profile`.
+When neither is set, branch review base falls back to upstream, `origin/main`,
+`origin/master`, then `main`.
+
+`ignore` globs are applied to local and pre-push branch diff prompts with Git
+pathspec excludes before Codex is invoked, for example
+`git diff origin/main...HEAD -- . ':(exclude)dist/**'`. For full-repository
+reviews the ignore list is advisory because Codex can still inspect the
+workspace; the CLI prints a warning in that case. The CLI does not accept
+explicit path arguments today, so it does not hide user-requested paths.
+
+Profiles change branch-review emphasis:
+
+- `standard` prioritizes concrete defects and material review gaps.
+- `pr-readiness` asks whether the branch is ready for review or merge, including tests, docs, CI/build impact, and rollout risk.
+- `repo-policy` includes policy-file context and asks Codex to report concrete repository policy conflicts.
 
 For pre-commit:
 

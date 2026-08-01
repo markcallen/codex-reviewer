@@ -21,6 +21,8 @@ type DockerOptions struct {
 	Base         string
 	Report       string
 	Instructions string
+	Profile      string
+	PolicyFile   string
 	Structured   bool
 	Full         bool
 	DryRun       bool
@@ -167,6 +169,8 @@ func dockerReviewArgs(repoRoot, reportPath string, opts DockerOptions) []string 
 		Base:         opts.Base,
 		Report:       opts.Report,
 		Instructions: opts.Instructions,
+		Profile:      opts.Profile,
+		PolicyFile:   opts.PolicyFile,
 		Structured:   opts.Structured,
 		Full:         opts.Full,
 	}

@@ -99,6 +99,21 @@ use a different reviewer than the one committed with the repository. Rerunning
 `codex-reviewer install` with a newer binary refreshes the recorded version
 without replacing the pre-push settings.
 
+The same file can also hold repo-local review defaults:
+
+```toml
+[review]
+base = "origin/main"
+ignore = ["dist/**", "*.lock"]
+directives = ["Focus on public API compatibility."]
+profile = "pr-readiness"
+policy_file = "docs/review-policy.md"
+```
+
+Explicit CLI flags win over config. `ignore` globs are applied to local and
+pre-push branch diff prompts with Git pathspec excludes. For full-repository
+reviews they are advisory only, and the CLI prints a warning.
+
 ## 5. Local machine setup
 
 To use the reviewer in every repo without committing project files:
@@ -142,7 +157,7 @@ make docker-build-runner
 Publish the image to GHCR:
 
 ```bash
-export GHCR_IMAGE=ghcr.io/<owner>/codex-code-reviewer
+export GHCR_IMAGE=ghcr.io/markcallen/codex-reviewer
 export GHCR_TAG=v0.1.0
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
 make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
@@ -187,6 +202,31 @@ Structured mode requires the report to include a diff summary, areas checked,
 areas not checked or not deeply verified, prioritized findings, and tests to
 run.
 
+Profile-guided branch reviews:
+
+```bash
+codex-reviewer review local \
+  --base origin/main \
+  --profile repo-policy \
+  --policy-file docs/review-policy.md
+```
+
+Supported profiles are `standard`, `pr-readiness`, and `repo-policy`.
+`repo-policy` includes policy-file context and report-scope metadata in the
+prompt.
+
+Advisory mode recommendation:
+
+```bash
+codex-reviewer review recommend --base origin/main
+```
+
+This command does not use the network or invoke Codex. It reports changed-file
+count, approximate diff size, risk signals, a recommended mode, reasons, and an
+approximate token range. `codex-reviewer review local --recommend` and
+`codex-reviewer review pre-push --recommend` provide the same advisory output
+from those workflows.
+
 Non-interactive full repository review:
 
 ```bash
@@ -201,8 +241,8 @@ codex-reviewer review pre-push
 
 The command does not install or manage hooks. It reads `.codex-reviewer.toml`,
 checks that the installed config version matches the running binary, requires a
-clean working tree by default, runs `codex exec review`, and writes the report to
-`.git/codex-review/pre-push-review.md` unless configured otherwise.
+clean working tree by default, runs a prompt-based branch review, and writes the
+report to `.git/codex-review/pre-push-review.md` unless configured otherwise.
 
 Built-in local reviewer:
 

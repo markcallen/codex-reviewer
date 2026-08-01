@@ -1,3 +1,3 @@
-module github.com/everydaydevops/codex-code-reviewer
+module github.com/markcallen/codex-reviewer
 
 go 1.25

@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/versionutil"
+	"github.com/markcallen/codex-reviewer/internal/versionutil"
 )
 
 type DoctorOptions struct {

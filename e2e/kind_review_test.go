@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/everydaydevops/codex-code-reviewer/internal/service"
+	"github.com/markcallen/codex-reviewer/internal/service"
 )
 
 type repoFixture struct {
