@@ -21,6 +21,8 @@ type DockerOptions struct {
 	Base         string
 	Report       string
 	Instructions string
+	Directives   []string
+	Ignore       []string
 	Profile      string
 	PolicyFile   string
 	Structured   bool
@@ -60,6 +62,29 @@ func RunDocker(ctx context.Context, opts DockerOptions) error {
 		return fmt.Errorf("find git repository root: %w", err)
 	}
 	repoRoot = filepath.Clean(strings.TrimSpace(repoRoot))
+
+	cfg, _, err := LoadRepoConfig(repoRoot, false)
+	if err != nil {
+		return err
+	}
+	if opts.Base == "" {
+		opts.Base = cfg.Base
+	}
+	if len(opts.Ignore) == 0 {
+		opts.Ignore = cfg.Ignore
+	}
+	if len(opts.Directives) == 0 {
+		opts.Directives = cfg.Directives
+	}
+	if opts.Profile == "" {
+		opts.Profile = cfg.Profile
+	}
+	if opts.PolicyFile == "" {
+		opts.PolicyFile = cfg.PolicyFile
+	}
+	if opts.Profile == "" {
+		opts.Profile = "standard"
+	}
 
 	reportPath, err := dockerContainerReportPath(repoRoot, opts.Report)
 	if err != nil {
@@ -169,6 +194,8 @@ func dockerReviewArgs(repoRoot, reportPath string, opts DockerOptions) []string 
 		Base:         opts.Base,
 		Report:       opts.Report,
 		Instructions: opts.Instructions,
+		Directives:   opts.Directives,
+		Ignore:       opts.Ignore,
 		Profile:      opts.Profile,
 		PolicyFile:   opts.PolicyFile,
 		Structured:   opts.Structured,
