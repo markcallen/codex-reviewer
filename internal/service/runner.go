@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/markcallen/codex-reviewer/internal/reviewer"
 	"github.com/markcallen/codex-reviewer/internal/usage"
 )
 
@@ -217,6 +218,7 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "checkout", "--detach", req.HeadSHA); err != nil {
 		return fmt.Errorf("checkout head SHA: %w", err)
 	}
+	req = mergeRunnerRepoConfig(req, opts.Workspace)
 	if err := opts.Runner.Run(ctx, opts.Workspace, "git", "remote", "set-url", "origin", req.RepoURL); err != nil {
 		return fmt.Errorf("sanitize repository remote: %w", err)
 	}
@@ -302,11 +304,42 @@ func reviewPrompt(req ReviewRequest) string {
 	fmt.Fprintf(&b, " Use the %s review profile.", req.ProfileName)
 	b.WriteString(" Return a prioritized Markdown report that starts with Block, Approve with fixes, or No blocking findings.")
 	b.WriteString(" Focus on correctness, security/privacy, regressions, missing tests, and maintainability. Do not edit files.")
+	if len(req.Directives) > 0 {
+		b.WriteString(" Repository review directives: ")
+		b.WriteString(strings.Join(req.Directives, " "))
+	}
+	if len(req.Ignore) > 0 {
+		b.WriteString(" Repository ignore globs from .codex-reviewer.toml: ")
+		b.WriteString(strings.Join(req.Ignore, ", "))
+		b.WriteString(". Treat these as advisory exclusions for generated, vendored, dependency, or build-output paths unless surrounding context is needed for a finding.")
+	}
+	if req.PolicyFile != "" {
+		b.WriteString(" Repository policy file: ")
+		b.WriteString(req.PolicyFile)
+		b.WriteString(". Read it before writing findings when it exists.")
+	}
 	if req.Instructions != "" {
 		b.WriteString(" Additional instructions: ")
 		b.WriteString(req.Instructions)
 	}
 	return b.String()
+}
+
+func mergeRunnerRepoConfig(req ReviewRequest, workspace string) ReviewRequest {
+	cfg, found, err := reviewer.LoadRepoConfig(workspace, false)
+	if err != nil || !found {
+		return req
+	}
+	if len(req.Directives) == 0 {
+		req.Directives = cleanStringList(cfg.Directives)
+	}
+	if len(req.Ignore) == 0 {
+		req.Ignore = cleanStringList(cfg.Ignore)
+	}
+	if req.PolicyFile == "" {
+		req.PolicyFile = strings.TrimSpace(cfg.PolicyFile)
+	}
+	return req
 }
 
 func ParseVerdictFile(path string) (string, error) {

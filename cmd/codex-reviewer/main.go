@@ -24,6 +24,17 @@ import (
 var version = "dev"
 var listenAndServe = http.ListenAndServe
 
+type stringListFlag []string
+
+func (f *stringListFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *stringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 func interruptContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
@@ -238,6 +249,9 @@ func runServiceJobManifest(args []string) {
 	fs.StringVar(&submitOpts.HeadSHA, "head-sha", "", "exact head SHA; defaults to resolving --head")
 	fs.StringVar(&submitOpts.ProfileName, "profile", "", "review profile; defaults to standard")
 	fs.StringVar(&submitOpts.Instructions, "instructions", "", "additional review instructions")
+	fs.Var((*stringListFlag)(&submitOpts.Directives), "directive", "review directive; repeat to override configured directives")
+	fs.Var((*stringListFlag)(&submitOpts.Ignore), "ignore", "review ignore glob; repeat to override configured ignore globs")
+	fs.StringVar(&submitOpts.PolicyFile, "policy-file", "", "repository policy file to include in review context")
 	fs.BoolVar(&submitOpts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
 	fs.StringVar(&jobOpts.ReviewID, "review-id", "", "review id used in the Kubernetes Job name")
 	fs.StringVar(&jobOpts.Namespace, "namespace", "", "Kubernetes namespace")
@@ -303,6 +317,9 @@ func runServiceSubmit(args []string) {
 	fs.StringVar(&opts.HeadSHA, "head-sha", "", "exact head SHA; defaults to resolving --head")
 	fs.StringVar(&opts.ProfileName, "profile", "", "review profile; defaults to standard")
 	fs.StringVar(&opts.Instructions, "instructions", "", "additional review instructions")
+	fs.Var((*stringListFlag)(&opts.Directives), "directive", "review directive; repeat to override configured directives")
+	fs.Var((*stringListFlag)(&opts.Ignore), "ignore", "review ignore glob; repeat to override configured ignore globs")
+	fs.StringVar(&opts.PolicyFile, "policy-file", "", "repository policy file to include in review context")
 	fs.StringVar(&opts.ReturnFormat, "return-format", "markdown", "review output format")
 	fs.StringVar(&output, "output", "", "write dry-run request JSON to this path")
 	fs.BoolVar(&dryRun, "dry-run", false, "build and print the review request without submitting it")
