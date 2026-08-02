@@ -250,6 +250,24 @@ func TestClientSubmitsReview(t *testing.T) {
 	}
 }
 
+func TestClientGetsReviewStatus(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/reviews/review-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		writeJSON(w, http.StatusOK, ReviewResponse{ID: "review-1", Status: "submitted", Profile: "standard"})
+	}))
+	defer httpServer.Close()
+
+	resp, err := Client{BaseURL: httpServer.URL}.Status(context.Background(), "review-1")
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if resp.ID != "review-1" || resp.Status != "submitted" {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
 func TestClientReadsReport(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/reviews/review-1/report" {

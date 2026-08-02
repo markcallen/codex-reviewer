@@ -17,6 +17,36 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+func (c Client) Status(ctx context.Context, id string) (ReviewResponse, error) {
+	if c.HTTPClient == nil {
+		c.HTTPClient = http.DefaultClient
+	}
+	u, err := url.JoinPath(strings.TrimRight(c.BaseURL, "/"), "reviews", id)
+	if err != nil {
+		return ReviewResponse{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return ReviewResponse{}, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return ReviewResponse{}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var review ReviewResponse
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return ReviewResponse{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if review.Error != "" {
+			return review, fmt.Errorf("review API returned %s: %s", resp.Status, review.Error)
+		}
+		return review, fmt.Errorf("review API returned %s", resp.Status)
+	}
+	return review, nil
+}
+
 func (c Client) Report(ctx context.Context, reportURL string) ([]byte, error) {
 	if c.HTTPClient == nil {
 		c.HTTPClient = http.DefaultClient

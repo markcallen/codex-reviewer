@@ -47,7 +47,12 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return "", fmt.Errorf("create review tracking directory: %w", err)
 	}
+	recordPath := filepath.Join(baseDir, "record.json")
+	existing, _ := ReadReviewRecord(recordPath)
 	reportPath := opts.ReportPath
+	if reportPath == "" {
+		reportPath = existing.ReportPath
+	}
 	if len(opts.Report) > 0 {
 		if reportPath == "" {
 			reportPath = filepath.Join(baseDir, "review.md")
@@ -61,21 +66,26 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 			return "", fmt.Errorf("write tracked review report: %w", err)
 		}
 	}
+	request := opts.Request
+	if reviewRequestIsZero(request) {
+		request = existing.Request
+	}
+	apiURL := firstNonEmpty(opts.APIURL, existing.APIURL)
+	response := mergeReviewResponse(existing.Response, opts.Response)
 	record := ReviewRecord{
 		SchemaVersion: "codex-reviewer.review_record.v1",
-		ID:            opts.Response.ID,
-		Status:        opts.Response.Status,
-		Verdict:       firstNonEmpty(opts.Response.Verdict, verdictFromReport(opts.Report)),
-		Profile:       opts.Response.Profile,
-		JobName:       opts.Response.JobName,
-		APIURL:        opts.APIURL,
-		ReportURL:     opts.Response.ReportURL,
+		ID:            response.ID,
+		Status:        response.Status,
+		Verdict:       firstNonEmpty(response.Verdict, verdictFromReport(opts.Report), existing.Verdict),
+		Profile:       response.Profile,
+		JobName:       response.JobName,
+		APIURL:        apiURL,
+		ReportURL:     response.ReportURL,
 		ReportPath:    reportPath,
-		Request:       opts.Request,
-		Response:      opts.Response,
+		Request:       request,
+		Response:      response,
 		RecordedAt:    opts.Now().UTC().Format(time.RFC3339),
 	}
-	recordPath := filepath.Join(baseDir, "record.json")
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return "", err
@@ -85,6 +95,57 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 		return "", fmt.Errorf("write review record: %w", err)
 	}
 	return recordPath, nil
+}
+
+func ReadReviewRecord(path string) (ReviewRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ReviewRecord{}, err
+	}
+	var record ReviewRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return ReviewRecord{}, err
+	}
+	return record, nil
+}
+
+func reviewRequestIsZero(req ReviewRequest) bool {
+	return req.RepoURL == "" &&
+		req.BaseRef == "" &&
+		req.HeadRef == "" &&
+		req.HeadSHA == "" &&
+		req.ProfileName == "" &&
+		req.Profile == (Profile{}) &&
+		req.Instructions == "" &&
+		len(req.Directives) == 0 &&
+		len(req.Ignore) == 0 &&
+		req.PolicyFile == "" &&
+		req.ReturnFormat == ""
+}
+
+func mergeReviewResponse(existing, next ReviewResponse) ReviewResponse {
+	if next.ID == "" {
+		next.ID = existing.ID
+	}
+	if next.Status == "" {
+		next.Status = existing.Status
+	}
+	if next.Verdict == "" {
+		next.Verdict = existing.Verdict
+	}
+	if next.Profile == "" {
+		next.Profile = existing.Profile
+	}
+	if next.JobName == "" {
+		next.JobName = existing.JobName
+	}
+	if next.ReportURL == "" {
+		next.ReportURL = existing.ReportURL
+	}
+	if next.Error == "" {
+		next.Error = existing.Error
+	}
+	return next
 }
 
 func verdictFromReport(report []byte) string {

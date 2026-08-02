@@ -127,6 +127,10 @@ func runService(args []string) {
 		runServiceAPI(args[1:])
 	case "submit":
 		runServiceSubmit(args[1:])
+	case "status":
+		runServiceStatus(args[1:])
+	case "report":
+		runServiceReport(args[1:])
 	case "job-manifest":
 		runServiceJobManifest(args[1:])
 	case "runner":
@@ -140,6 +144,15 @@ func runService(args []string) {
 		serviceUsage()
 		os.Exit(2)
 	}
+}
+
+func defaultServiceAPIURL() string {
+	reviewerCfg := codexconfig.LoadReviewerConfig()
+	defaultAPIURL := os.Getenv("CODEX_REVIEWER_API_URL")
+	if defaultAPIURL == "" && reviewerCfg.Backend == "k8s" {
+		defaultAPIURL = reviewerCfg.K8sAPIURL
+	}
+	return defaultAPIURL
 }
 
 func runServiceTelemetry(args []string) {
@@ -310,13 +323,8 @@ func runServiceSubmit(args []string) {
 	var wait bool
 	var track bool
 	var waitTimeout time.Duration
-	reviewerCfg := codexconfig.LoadReviewerConfig()
-	defaultAPIURL := os.Getenv("CODEX_REVIEWER_API_URL")
-	if defaultAPIURL == "" && reviewerCfg.Backend == "k8s" {
-		defaultAPIURL = reviewerCfg.K8sAPIURL
-	}
 	fs := flag.NewFlagSet("service submit", flag.ExitOnError)
-	fs.StringVar(&apiURL, "api-url", defaultAPIURL, "review API base URL; defaults to CODEX_REVIEWER_API_URL or [codex_reviewer].k8s_api_url when backend is k8s")
+	fs.StringVar(&apiURL, "api-url", defaultServiceAPIURL(), "review API base URL; defaults to CODEX_REVIEWER_API_URL or [codex_reviewer].k8s_api_url when backend is k8s")
 	fs.StringVar(&opts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
 	fs.StringVar(&opts.BaseRef, "base", "", "base branch/ref; defaults to origin/main")
 	fs.StringVar(&opts.HeadRef, "head", "", "head branch/ref; defaults to HEAD")
@@ -427,6 +435,111 @@ func runServiceSubmit(args []string) {
 	}
 	respData = append(respData, '\n')
 	fmt.Print(string(respData))
+}
+
+func runServiceStatus(args []string) {
+	var apiURL string
+	var track bool
+	fs := flag.NewFlagSet("service status", flag.ExitOnError)
+	fs.StringVar(&apiURL, "api-url", defaultServiceAPIURL(), "review API base URL; defaults to CODEX_REVIEWER_API_URL or [codex_reviewer].k8s_api_url when backend is k8s")
+	fs.BoolVar(&track, "track", true, "update the non-secret review record under codex-review/k8s-reviews")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service status [flags] REVIEW_ID\n\n")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	if apiURL == "" {
+		fmt.Fprintln(os.Stderr, "service status requires --api-url, CODEX_REVIEWER_API_URL, or [codex_reviewer].k8s_api_url with backend = \"k8s\"")
+		os.Exit(1)
+	}
+	resp, err := service.Client{BaseURL: apiURL}.Status(context.Background(), fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get review status failed: %v\n", err)
+		os.Exit(1)
+	}
+	if track {
+		recordPath, err := service.TrackReview(service.TrackReviewOptions{
+			Dir:      ".",
+			APIURL:   apiURL,
+			Response: resp,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "track review failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "codex-reviewer: tracked review in %s\n", recordPath)
+	}
+	respData, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "encode review response failed: %v\n", err)
+		os.Exit(1)
+	}
+	respData = append(respData, '\n')
+	fmt.Print(string(respData))
+}
+
+func runServiceReport(args []string) {
+	var apiURL string
+	var output string
+	var track bool
+	fs := flag.NewFlagSet("service report", flag.ExitOnError)
+	fs.StringVar(&apiURL, "api-url", defaultServiceAPIURL(), "review API base URL; defaults to CODEX_REVIEWER_API_URL or [codex_reviewer].k8s_api_url when backend is k8s")
+	fs.StringVar(&output, "output", "", "write review report to this path")
+	fs.BoolVar(&track, "track", true, "update the non-secret review record under codex-review/k8s-reviews")
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: codex-reviewer service report [flags] REVIEW_ID\n\n")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	if apiURL == "" {
+		fmt.Fprintln(os.Stderr, "service report requires --api-url, CODEX_REVIEWER_API_URL, or [codex_reviewer].k8s_api_url with backend = \"k8s\"")
+		os.Exit(1)
+	}
+	id := fs.Arg(0)
+	resp, err := service.Client{BaseURL: apiURL}.Status(context.Background(), id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get review status failed: %v\n", err)
+		os.Exit(1)
+	}
+	reportURL := resp.ReportURL
+	if reportURL == "" {
+		reportURL = "/reviews/" + id + "/report"
+	}
+	report, err := service.Client{BaseURL: apiURL}.Report(context.Background(), reportURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "get review report failed: %v\n", err)
+		os.Exit(1)
+	}
+	if output != "" {
+		if err := writeOutputFile(output, report); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Print(string(report))
+	}
+	if track {
+		recordPath, err := service.TrackReview(service.TrackReviewOptions{
+			Dir:        ".",
+			APIURL:     apiURL,
+			Response:   resp,
+			Report:     report,
+			ReportPath: output,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "track review failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "codex-reviewer: tracked review in %s\n", recordPath)
+	}
 }
 
 func writeOutputFile(path string, data []byte) error {
@@ -946,6 +1059,8 @@ Usage:
   codex-reviewer review recommend [flags]
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
+  codex-reviewer service status [flags] REVIEW_ID
+  codex-reviewer service report [flags] REVIEW_ID
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
   codex-reviewer service telemetry [flags]
@@ -982,6 +1097,8 @@ func serviceUsage() {
 Usage:
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
+  codex-reviewer service status [flags] REVIEW_ID
+  codex-reviewer service report [flags] REVIEW_ID
   codex-reviewer service job-manifest [flags]
   codex-reviewer service runner
   codex-reviewer service telemetry [flags]

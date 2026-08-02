@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/markcallen/codex-reviewer/internal/installer"
+	"github.com/markcallen/codex-reviewer/internal/service"
 )
 
 func TestRunWorkflowRunDryRun(t *testing.T) {
@@ -180,6 +181,68 @@ func TestRunServiceSubmitWaitWritesReport(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join("codex-review", "k8s-reviews", "review-1", "record.json")); !strings.Contains(got, reportPath) {
 		t.Fatalf("record did not include report path:\n%s", got)
+	}
+}
+
+func TestRunServiceStatusTracksResponse(t *testing.T) {
+	t.Chdir(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/reviews/review-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(serviceReviewResponse("review-1", "submitted"))
+	}))
+	defer server.Close()
+
+	out := captureStdout(t, func() {
+		runServiceStatus([]string{"--api-url", server.URL, "review-1"})
+	})
+	if !strings.Contains(out, `"id": "review-1"`) {
+		t.Fatalf("status output missing review id:\n%s", out)
+	}
+	record := readFile(t, filepath.Join("codex-review", "k8s-reviews", "review-1", "record.json"))
+	if !strings.Contains(record, `"status": "submitted"`) || !strings.Contains(record, `"api_url": "`+server.URL+`"`) {
+		t.Fatalf("record missing status/api url:\n%s", record)
+	}
+}
+
+func TestRunServiceReportWritesOutputAndUpdatesTrackedRecord(t *testing.T) {
+	t.Chdir(t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/reviews/review-1":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(serviceReviewResponse("review-1", "submitted"))
+		case "/reviews/review-1/report":
+			_, _ = w.Write([]byte("Approve with fixes\n\n- P1 example\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runServiceStatus([]string{"--api-url", server.URL, "review-1"})
+	reportPath := filepath.Join("codex-review", "review-1.md")
+	runServiceReport([]string{"--api-url", server.URL, "--output", reportPath, "review-1"})
+	if got := readFile(t, reportPath); !strings.Contains(got, "Approve with fixes") {
+		t.Fatalf("report = %q", got)
+	}
+	record := readFile(t, filepath.Join("codex-review", "k8s-reviews", "review-1", "record.json"))
+	for _, want := range []string{`"verdict": "approve_with_fixes"`, `"report_path": "` + reportPath + `"`, `"status": "submitted"`} {
+		if !strings.Contains(record, want) {
+			t.Fatalf("record missing %q:\n%s", want, record)
+		}
+	}
+}
+
+func serviceReviewResponse(id, status string) service.ReviewResponse {
+	return service.ReviewResponse{
+		ID:        id,
+		Status:    status,
+		Profile:   "standard",
+		JobName:   "codex-review-" + id,
+		ReportURL: "/reviews/" + id + "/report",
 	}
 }
 

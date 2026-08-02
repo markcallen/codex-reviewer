@@ -38,16 +38,23 @@ codex-reviewer service submit \
   --output codex-review/k8s-review.md
 ```
 
-4. Read the review report and the generated tracking record:
+4. If the review was submitted without `--wait`, refresh it later:
+
+```bash
+codex-reviewer service status REVIEW_ID
+codex-reviewer service report REVIEW_ID --output codex-review/k8s-review.md
+```
+
+5. Read the review report and the generated tracking record:
 
 ```bash
 find codex-review/k8s-reviews -maxdepth 2 -name record.json -print
 ```
 
-5. Treat `Block` as merge-blocking. Fix concrete P0/P1 findings, rerun tests,
+6. Treat `Block` as merge-blocking. Fix concrete P0/P1 findings, rerun tests,
 and submit another Kubernetes review.
 
-6. Commit the non-secret review artifacts when they are relevant to future
+7. Commit the non-secret review artifacts when they are relevant to future
 agents:
 
 ```bash

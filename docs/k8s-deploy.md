@@ -97,6 +97,16 @@ codex-reviewer service submit \
   --output codex-review/k8s-review.md
 ```
 
+For asynchronous submissions, keep the review ID from `service submit`, then
+refresh status or fetch the report later:
+
+```bash
+codex-reviewer service status REVIEW_ID
+codex-reviewer service report REVIEW_ID --output codex-review/k8s-review.md
+```
+
+Both commands update the same git-visible tracking record by default.
+
 The CLI writes:
 
 ```text
