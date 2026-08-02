@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -181,6 +182,8 @@ func runServiceAPI(args []string) {
 	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account for review jobs")
 	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
 	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
+	fs.StringVar(&jobOpts.CodexAuthSecretName, "codex-auth-secret", "", "optional Kubernetes Secret containing Codex auth.json literal content in CODEX_AUTH")
+	fs.StringVar(&jobOpts.CodexAuthSecretKey, "codex-auth-secret-key", "auth.json", "Secret key containing Codex auth.json literal content")
 	fs.StringVar(&jobOpts.GitHubSecretName, "github-secret", "", "optional Kubernetes Secret containing a GitHub token for private repo clones")
 	fs.StringVar(&jobOpts.GitHubSecretKey, "github-secret-key", "token", "Secret key containing the GitHub token")
 	fs.StringVar(&jobOpts.ProxyURL, "proxy-url", "", "proxy URL exposed by the sidecar")
@@ -260,6 +263,8 @@ func runServiceJobManifest(args []string) {
 	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account")
 	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
 	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
+	fs.StringVar(&jobOpts.CodexAuthSecretName, "codex-auth-secret", "", "optional Kubernetes Secret containing Codex auth.json literal content in CODEX_AUTH")
+	fs.StringVar(&jobOpts.CodexAuthSecretKey, "codex-auth-secret-key", "auth.json", "Secret key containing Codex auth.json literal content")
 	fs.StringVar(&jobOpts.GitHubSecretName, "github-secret", "", "optional Kubernetes Secret containing a GitHub token for private repo clones")
 	fs.StringVar(&jobOpts.GitHubSecretKey, "github-secret-key", "token", "Secret key containing the GitHub token")
 	fs.StringVar(&jobOpts.ProxyURL, "proxy-url", "", "proxy URL exposed by the sidecar")
@@ -288,7 +293,7 @@ func runServiceJobManifest(args []string) {
 		os.Exit(1)
 	}
 	if output != "" {
-		if err := os.WriteFile(output, data, 0o644); err != nil {
+		if err := writeOutputFile(output, data); err != nil {
 			fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
 			os.Exit(1)
 		}
@@ -303,6 +308,7 @@ func runServiceSubmit(args []string) {
 	var apiURL string
 	var dryRun bool
 	var wait bool
+	var track bool
 	var waitTimeout time.Duration
 	reviewerCfg := codexconfig.LoadReviewerConfig()
 	defaultAPIURL := os.Getenv("CODEX_REVIEWER_API_URL")
@@ -324,6 +330,7 @@ func runServiceSubmit(args []string) {
 	fs.StringVar(&output, "output", "", "write dry-run request JSON to this path")
 	fs.BoolVar(&dryRun, "dry-run", false, "build and print the review request without submitting it")
 	fs.BoolVar(&wait, "wait", false, "wait for the remote review to finish")
+	fs.BoolVar(&track, "track", true, "write a non-secret review record under codex-review/k8s-reviews")
 	fs.DurationVar(&waitTimeout, "timeout", 10*time.Minute, "maximum time to wait for the review report when --wait is set")
 	fs.BoolVar(&opts.RequireCleanTree, "require-clean-tree", true, "require a clean committed working tree")
 	fs.Usage = func() {
@@ -349,7 +356,7 @@ func runServiceSubmit(args []string) {
 			os.Exit(1)
 		}
 		if output != "" {
-			if err := os.WriteFile(output, data, 0o644); err != nil {
+			if err := writeOutputFile(output, data); err != nil {
 				fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
 				os.Exit(1)
 			}
@@ -376,14 +383,42 @@ func runServiceSubmit(args []string) {
 			os.Exit(1)
 		}
 		if output != "" {
-			if err := os.WriteFile(output, report, 0o644); err != nil {
+			if err := writeOutputFile(output, report); err != nil {
 				fmt.Fprintf(os.Stderr, "write %s failed: %v\n", output, err)
 				os.Exit(1)
 			}
 		} else {
 			fmt.Print(string(report))
 		}
+		if track {
+			recordPath, err := service.TrackReview(service.TrackReviewOptions{
+				Dir:        ".",
+				APIURL:     apiURL,
+				Request:    req,
+				Response:   resp,
+				Report:     report,
+				ReportPath: output,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "track review failed: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "codex-reviewer: tracked review in %s\n", recordPath)
+		}
 		return
+	}
+	if track {
+		recordPath, err := service.TrackReview(service.TrackReviewOptions{
+			Dir:      ".",
+			APIURL:   apiURL,
+			Request:  req,
+			Response: resp,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "track review failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "codex-reviewer: tracked review in %s\n", recordPath)
 	}
 	respData, err := json.MarshalIndent(resp, "", "  ")
 	if err != nil {
@@ -392,6 +427,15 @@ func runServiceSubmit(args []string) {
 	}
 	respData = append(respData, '\n')
 	fmt.Print(string(respData))
+}
+
+func writeOutputFile(path string, data []byte) error {
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 func runReview(args []string) {

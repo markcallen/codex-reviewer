@@ -152,7 +152,7 @@ func TestRunServiceTelemetryConfiguresServer(t *testing.T) {
 
 func TestRunServiceSubmitWaitWritesReport(t *testing.T) {
 	t.Chdir(t.TempDir())
-	reportPath := filepath.Join(t.TempDir(), "report.md")
+	reportPath := filepath.Join("codex-review", "nested", "report.md")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/reviews":
@@ -177,6 +177,9 @@ func TestRunServiceSubmitWaitWritesReport(t *testing.T) {
 	})
 	if got := readFile(t, reportPath); got != "No blocking findings\n" {
 		t.Fatalf("report = %q", got)
+	}
+	if got := readFile(t, filepath.Join("codex-review", "k8s-reviews", "review-1", "record.json")); !strings.Contains(got, reportPath) {
+		t.Fatalf("record did not include report path:\n%s", got)
 	}
 }
 

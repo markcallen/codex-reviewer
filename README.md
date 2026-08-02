@@ -197,6 +197,20 @@ k8s_api_url = ""
 To use a Kubernetes-backed review API, set `backend = "k8s"` and configure
 `k8s_api_url`, then run `codex-reviewer service submit`.
 
+Kubernetes deployment, Codex device-code auth, and shared agent workflow details
+are in [docs/k8s-deploy.md](docs/k8s-deploy.md). When `CODEX_AUTH` is provided
+as the literal JSON from Codex `auth.json`, review Jobs install it as
+`$CODEX_HOME/auth.json` and ignore API-key auth before launching Codex.
+
+`service submit` writes non-secret review records under
+`codex-review/k8s-reviews/<review-id>/record.json` by default. Commit those
+records and the review report when future agents should know which Kubernetes
+review ran and what outcome it produced. Use `--track=false` for intentionally
+ephemeral submissions.
+
+The installable shared skill for Codex or Claude lives in
+`skills/k8s-code-review/`.
+
 ## Docker and GHCR
 
 For a local container workflow without kind, build the reviewer image:

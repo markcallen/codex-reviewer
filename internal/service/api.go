@@ -66,8 +66,8 @@ func NewAPIServer(opts APIOptions) (*APIServer, error) {
 	if opts.JobOptions.SidecarImage == "" {
 		return nil, fmt.Errorf("sidecar image is required")
 	}
-	if opts.JobOptions.OpenAISecretName == "" {
-		return nil, fmt.Errorf("OpenAI secret name is required")
+	if opts.JobOptions.OpenAISecretName == "" && opts.JobOptions.CodexAuthSecretName == "" {
+		return nil, fmt.Errorf("OpenAI secret name or Codex auth secret name is required")
 	}
 	return &APIServer{opts: opts, reviews: make(map[string]ReviewResponse)}, nil
 }

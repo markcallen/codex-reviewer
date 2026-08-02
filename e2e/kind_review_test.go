@@ -43,7 +43,8 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 
 	reviewerImage := requireEnv(t, "CODEX_REVIEWER_REVIEWER_IMAGE")
 	sidecarImage := requireEnv(t, "CODEX_REVIEWER_SIDECAR_IMAGE")
-	openAISecret := requireEnv(t, "CODEX_REVIEWER_OPENAI_SECRET")
+	openAISecret := envDefault("CODEX_REVIEWER_OPENAI_SECRET", "")
+	codexAuthSecret := envDefault("CODEX_REVIEWER_CODEX_AUTH_SECRET", "")
 	githubSecret := requireEnv(t, "CODEX_REVIEWER_GITHUB_SECRET")
 	namespace := envDefault("CODEX_REVIEWER_NAMESPACE", "codex-reviewer-e2e")
 	cluster := envDefault("CODEX_REVIEWER_KIND_CLUSTER", "codex-reviewer-e2e")
@@ -54,7 +55,17 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 
 	ensureKindCluster(t, ctx, cluster)
 	ensureNamespace(t, ctx, kubeContext, namespace)
-	ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+	if os.Getenv("CODEX_AUTH") != "" {
+		if codexAuthSecret == "" {
+			codexAuthSecret = "codex-auth"
+		}
+		ensureSecretFromEnv(t, ctx, kubeContext, namespace, codexAuthSecret, "auth.json", "CODEX_AUTH")
+	} else {
+		if openAISecret == "" {
+			openAISecret = requireEnv(t, "CODEX_REVIEWER_OPENAI_SECRET")
+		}
+		ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+	}
 	ensureSecretFromEnv(t, ctx, kubeContext, namespace, githubSecret, "token", "GITHUB_TOKEN")
 
 	fixtures := loadFixtures(t)
@@ -73,13 +84,14 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 				ReturnFormat: "markdown",
 			}
 			manifest, err := service.JobManifest(req, service.JobOptions{
-				ReviewID:         "e2e-" + sanitizeName(repo.Name),
-				Namespace:        namespace,
-				ReviewerImage:    reviewerImage,
-				SidecarImage:     sidecarImage,
-				OpenAISecretName: openAISecret,
-				GitHubSecretName: githubSecret,
-				ServiceAccount:   envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", ""),
+				ReviewID:            "e2e-" + sanitizeName(repo.Name),
+				Namespace:           namespace,
+				ReviewerImage:       reviewerImage,
+				SidecarImage:        sidecarImage,
+				OpenAISecretName:    openAISecret,
+				CodexAuthSecretName: codexAuthSecret,
+				GitHubSecretName:    githubSecret,
+				ServiceAccount:      envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", ""),
 			})
 			if err != nil {
 				t.Fatalf("JobManifest() error = %v", err)

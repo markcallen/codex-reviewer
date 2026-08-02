@@ -111,6 +111,9 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
+	if err := installCodexAuthFromEnv(); err != nil {
+		return err
+	}
 	debugLogPath := filepath.Join(opts.OutputDir, "debug.log")
 	debugLog, err := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -191,6 +194,35 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	}
 	writeDebugLog(debugLog, "run succeeded verdict=%s finished_at=%s\n", verdict, metadata.FinishedAt)
 	_, _ = opts.Stdout.Write(reportData)
+	return nil
+}
+
+func installCodexAuthFromEnv() error {
+	auth := strings.TrimSpace(os.Getenv("CODEX_AUTH"))
+	if auth == "" {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(auth), &decoded); err != nil {
+		return fmt.Errorf("decode CODEX_AUTH JSON: %w", err)
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("discover home directory for CODEX_AUTH: %w", err)
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		return fmt.Errorf("create CODEX_HOME: %w", err)
+	}
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(authPath, []byte(auth+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write Codex auth file: %w", err)
+	}
+	_ = os.Unsetenv("CODEX_API_KEY")
+	_ = os.Unsetenv("OPENAI_API_KEY")
 	return nil
 }
 

@@ -27,6 +27,8 @@ GHCR_PULL_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_PULL_TAG)
 REVIEW_ARGS ?= review --base origin/main --output-last-message codex-review/branch-review.md
 OPENAI_SECRET ?= openai-api
 OPENAI_SECRET_KEY ?= api-key
+CODEX_AUTH_SECRET ?= codex-auth
+CODEX_AUTH_SECRET_KEY ?= auth.json
 GITHUB_SECRET ?= github-token
 GITHUB_SECRET_KEY ?= token
 E2E_TEST ?= TestKindReviewsSmallAndLargePrivateRepos
@@ -34,7 +36,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -55,6 +57,8 @@ help:
 		'  make deps               Install dev tools and download Go modules' \
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
+		'  make deploy-k8s         Deploy the review API, RBAC, and service to Kubernetes' \
+		'  make install-k8s-skill  Install the Kubernetes review skill for Codex and Claude' \
 		'  make docker-build-runner Build the local reviewer container image' \
 		'  make docker-tag-runner   Tag the reviewer image for GHCR' \
 		'  make docker-push-runner  Push the reviewer image to GHCR' \
@@ -83,6 +87,7 @@ help:
 		'  GHCR_PULL_RUNNER_IMAGE=$(GHCR_PULL_RUNNER_IMAGE)' \
 		'  REVIEW_ARGS=$(REVIEW_ARGS)' \
 		'  OPENAI_SECRET=$(OPENAI_SECRET)' \
+		'  CODEX_AUTH_SECRET=$(CODEX_AUTH_SECRET)' \
 		'  GITHUB_SECRET=$(GITHUB_SECRET)'
 
 setup: deps check-deps build lint test test-e2e
@@ -149,10 +154,12 @@ smoke-k8s: kind-load-runner
 	sh scripts/smoke-k8s.sh
 
 check-e2e-deps: check-deps
-	@if [ -n "$${OPENAI_API_KEY:-}" ]; then \
+	@if [ -n "$${CODEX_AUTH:-}" ]; then \
+		printf '%-10s required=%-18s found=%-24s %s\n' codex-auth set set OK; \
+	elif [ -n "$${OPENAI_API_KEY:-}" ]; then \
 		printf '%-10s required=%-18s found=%-24s %s\n' openai-key set set OK; \
 	else \
-		printf '%-10s required=%-18s found=%-24s %s\n' openai-key set missing FAIL; exit 1; \
+		printf '%-10s required=%-18s found=%-24s %s\n' codex-auth-or-openai set missing FAIL; exit 1; \
 	fi
 	@if [ -n "$${GITHUB_TOKEN:-}" ]; then \
 		printf '%-10s required=%-18s found=%-24s %s\n' github-tok set set OK; \
@@ -185,24 +192,43 @@ kind-create:
 	fi
 
 kind-namespace: kind-create
+	$(MAKE) k8s-namespace
+
+k8s-namespace:
 	kubectl --context "$(KUBE_CONTEXT)" create namespace "$(NAMESPACE)" --dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 kind-service-account: kind-namespace
+	$(MAKE) k8s-service-account
+
+k8s-service-account: k8s-namespace
 	kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create serviceaccount "$(SERVICE_ACCOUNT)" --dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
 kind-secrets: kind-namespace
-	@[ -n "$${OPENAI_API_KEY:-}" ] || { echo 'OPENAI_API_KEY is required'; exit 1; }
+	@[ -n "$${CODEX_AUTH:-}" ] || [ -n "$${OPENAI_API_KEY:-}" ] || { echo 'CODEX_AUTH or OPENAI_API_KEY is required'; exit 1; }
 	@[ -n "$${GITHUB_TOKEN:-}" ] || { echo 'GITHUB_TOKEN is required'; exit 1; }
 	@tmpdir="$$(mktemp -d)"; \
 		trap 'rm -rf "$$tmpdir"' EXIT; \
-		printf '%s' "$$OPENAI_API_KEY" > "$$tmpdir/openai"; \
+		if [ -n "$${CODEX_AUTH:-}" ]; then \
+			printf '%s' "$$CODEX_AUTH" > "$$tmpdir/codex-auth"; \
+			kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(CODEX_AUTH_SECRET)" \
+				--from-file="$(CODEX_AUTH_SECRET_KEY)=$$tmpdir/codex-auth" \
+				--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -; \
+		else \
+			printf '%s' "$$OPENAI_API_KEY" > "$$tmpdir/openai"; \
+			kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(OPENAI_SECRET)" \
+				--from-file="$(OPENAI_SECRET_KEY)=$$tmpdir/openai" \
+				--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -; \
+		fi; \
 		printf '%s' "$$GITHUB_TOKEN" > "$$tmpdir/github"; \
-		kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(OPENAI_SECRET)" \
-			--from-file="$(OPENAI_SECRET_KEY)=$$tmpdir/openai" \
-			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -; \
 		kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" create secret generic "$(GITHUB_SECRET)" \
 			--from-file="$(GITHUB_SECRET_KEY)=$$tmpdir/github" \
 			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
+
+deploy-k8s: build k8s-namespace k8s-service-account
+	kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" apply -f deploy/k8s/codex-reviewer-api.yaml
+
+install-k8s-skill:
+	scripts/install-k8s-code-review-skill.sh both
 
 docker-build-runner: build
 	docker build --build-arg VERSION="$(VERSION)" -f Dockerfile.runner -t "$(RUNNER_IMAGE)" .
@@ -243,6 +269,7 @@ e2e: check-e2e-deps
 	CODEX_REVIEWER_REVIEWER_IMAGE="$(RUNNER_IMAGE)" \
 	CODEX_REVIEWER_SIDECAR_IMAGE="$(SIDECAR_IMAGE)" \
 	CODEX_REVIEWER_OPENAI_SECRET="$(OPENAI_SECRET)" \
+	CODEX_REVIEWER_CODEX_AUTH_SECRET="$(CODEX_AUTH_SECRET)" \
 	CODEX_REVIEWER_GITHUB_SECRET="$(GITHUB_SECRET)" \
 	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
 	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \
@@ -257,6 +284,7 @@ e2e-small: check-e2e-deps
 	CODEX_REVIEWER_REVIEWER_IMAGE="$(RUNNER_IMAGE)" \
 	CODEX_REVIEWER_SIDECAR_IMAGE="$(SIDECAR_IMAGE)" \
 	CODEX_REVIEWER_OPENAI_SECRET="$(OPENAI_SECRET)" \
+	CODEX_REVIEWER_CODEX_AUTH_SECRET="$(CODEX_AUTH_SECRET)" \
 	CODEX_REVIEWER_GITHUB_SECRET="$(GITHUB_SECRET)" \
 	CODEX_REVIEWER_NAMESPACE="$(NAMESPACE)" \
 	CODEX_REVIEWER_KIND_CLUSTER="$(KIND_CLUSTER)" \

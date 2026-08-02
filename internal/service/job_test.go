@@ -69,6 +69,29 @@ func TestJobManifestIncludesReviewerAndSidecar(t *testing.T) {
 	}
 }
 
+func TestJobManifestUsesCodexAuthInsteadOfAPIKeyForReviewer(t *testing.T) {
+	req := testReviewRequest(t)
+	data, err := JobManifest(req, JobOptions{
+		ReviewID:            "auth-review",
+		ReviewerImage:       "registry.local/codex-reviewer:phase1",
+		SidecarImage:        "registry.local/openai-egress:phase1",
+		CodexAuthSecretName: "codex-auth",
+	})
+	if err != nil {
+		t.Fatalf("JobManifest() error = %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"name": "CODEX_AUTH"`) {
+		t.Fatalf("manifest missing CODEX_AUTH env:\n%s", text)
+	}
+	if strings.Contains(text, `"name": "CODEX_API_KEY"`) || strings.Contains(text, `"name": "OPENAI_API_KEY"`) {
+		t.Fatalf("manifest should not inject API-key env when CODEX_AUTH is configured:\n%s", text)
+	}
+	if !strings.Contains(text, `"key": "auth.json"`) {
+		t.Fatalf("manifest missing default Codex auth secret key:\n%s", text)
+	}
+}
+
 func TestJobManifestValidatesRequiredInputs(t *testing.T) {
 	req := testReviewRequest(t)
 	_, err := JobManifest(req, JobOptions{ReviewID: "review-1"})

@@ -15,6 +15,8 @@ type JobOptions struct {
 	ServiceAccount        string
 	OpenAISecretName      string
 	OpenAISecretKey       string
+	CodexAuthSecretName   string
+	CodexAuthSecretKey    string
 	GitHubSecretName      string
 	GitHubSecretKey       string
 	ProxyURL              string
@@ -32,11 +34,14 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 	if opts.SidecarImage == "" {
 		return nil, fmt.Errorf("sidecar image is required")
 	}
-	if opts.OpenAISecretName == "" {
-		return nil, fmt.Errorf("OpenAI secret name is required")
+	if opts.OpenAISecretName == "" && opts.CodexAuthSecretName == "" {
+		return nil, fmt.Errorf("OpenAI secret name or Codex auth secret name is required")
 	}
-	if opts.OpenAISecretKey == "" {
+	if opts.OpenAISecretName != "" && opts.OpenAISecretKey == "" {
 		opts.OpenAISecretKey = "api-key"
+	}
+	if opts.CodexAuthSecretName != "" && opts.CodexAuthSecretKey == "" {
+		opts.CodexAuthSecretKey = "auth.json"
 	}
 	if opts.GitHubSecretName != "" && opts.GitHubSecretKey == "" {
 		opts.GitHubSecretKey = "token"
@@ -63,7 +68,19 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 		map[string]string{"name": "HTTPS_PROXY", "value": opts.ProxyURL},
 		map[string]string{"name": "HTTP_PROXY", "value": opts.ProxyURL},
 		map[string]string{"name": "ALL_PROXY", "value": opts.ProxyURL},
-		map[string]any{
+	}
+	if opts.CodexAuthSecretName != "" {
+		reviewerEnv = append(reviewerEnv, map[string]any{
+			"name": "CODEX_AUTH",
+			"valueFrom": map[string]any{
+				"secretKeyRef": map[string]string{
+					"name": opts.CodexAuthSecretName,
+					"key":  opts.CodexAuthSecretKey,
+				},
+			},
+		})
+	} else if opts.OpenAISecretName != "" {
+		reviewerEnv = append(reviewerEnv, map[string]any{
 			"name": "CODEX_API_KEY",
 			"valueFrom": map[string]any{
 				"secretKeyRef": map[string]string{
@@ -71,7 +88,7 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 					"key":  opts.OpenAISecretKey,
 				},
 			},
-		},
+		})
 	}
 	if opts.GitHubSecretName != "" {
 		reviewerEnv = append(reviewerEnv, map[string]any{
@@ -80,6 +97,19 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 				"secretKeyRef": map[string]string{
 					"name": opts.GitHubSecretName,
 					"key":  opts.GitHubSecretKey,
+				},
+			},
+		})
+	}
+
+	sidecarEnv := []any{}
+	if opts.OpenAISecretName != "" {
+		sidecarEnv = append(sidecarEnv, map[string]any{
+			"name": "OPENAI_API_KEY",
+			"valueFrom": map[string]any{
+				"secretKeyRef": map[string]string{
+					"name": opts.OpenAISecretName,
+					"key":  opts.OpenAISecretKey,
 				},
 			},
 		})
@@ -120,17 +150,7 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 						map[string]any{
 							"name":  "openai-egress",
 							"image": opts.SidecarImage,
-							"env": []any{
-								map[string]any{
-									"name": "OPENAI_API_KEY",
-									"valueFrom": map[string]any{
-										"secretKeyRef": map[string]string{
-											"name": opts.OpenAISecretName,
-											"key":  opts.OpenAISecretKey,
-										},
-									},
-								},
-							},
+							"env":   sidecarEnv,
 							"ports": []any{
 								map[string]any{"name": "proxy", "containerPort": 8888},
 							},
