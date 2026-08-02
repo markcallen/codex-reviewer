@@ -320,8 +320,15 @@ explicit path arguments today, so it does not hide user-requested paths.
 Profiles change branch-review emphasis:
 
 - `standard` prioritizes concrete defects and material review gaps.
-- `pr-readiness` asks whether the branch is ready for review or merge, including tests, docs, CI/build impact, and rollout risk.
-- `repo-policy` includes policy-file context and asks Codex to report concrete repository policy conflicts.
+- `pr-readiness` asks whether the branch is ready for review or merge, including tests, docs, CI/build impact, hook/workflow setup, config/default/flag consistency, naming consistency, and rollout risk. It can report concrete P3 findings that affect developer workflow or release readiness.
+- `strict` combines standard defect review with PR-readiness and repo-policy checks, and is more willing to report concrete actionable P3 workflow, policy, and release-readiness findings.
+- `repo-policy` is a compatibility profile focused on repository policy conflicts. It includes policy-file context when provided.
+
+Branch review reports are prompted to include a `Review Scope` section with the
+base, head, review type, selected profile, policy files considered, changed
+files reviewed, and checks performed. Branch prompts always tell Codex to read
+`AGENTS.md` and `docs/code_review.md` when present and to inspect changed rule
+files under `.codex/rules/**` and `.claude/rules/**`.
 
 For pre-commit:
 

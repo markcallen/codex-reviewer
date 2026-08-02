@@ -120,7 +120,7 @@ func branchReviewPrompt(opts LocalOptions, instructions string) string {
 	if strings.TrimSpace(instructions) == "" {
 		return defaultBranchReviewPrompt(opts)
 	}
-	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `%s` and read relevant surrounding code before writing the report. Do not edit files.\n%s\n\n%s\n%s", base, diffCommand(base, opts.Ignore), profilePrompt(opts), instructions, reviewMetadata(opts))
+	return fmt.Sprintf("Review this branch against %s. Inspect the diff with `%s` and read relevant surrounding code before writing the report. Do not edit files.\n%s\n%s\n\n%s\n%s\n\nThe report must include a \"Review Scope\" section with base, head, review type, profile, policy files considered, changed files reviewed, and checks performed.", base, diffCommand(base, opts.Ignore), policyContextPrompt(), profilePrompt(opts), instructions, reviewMetadata(opts))
 }
 
 func defaultBranchReviewPrompt(opts LocalOptions) string {
@@ -130,19 +130,21 @@ func defaultBranchReviewPrompt(opts LocalOptions) string {
 Review scope:
 - Inspect the diff with %s and read relevant surrounding code before writing findings.
 - Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, concurrency, error handling, tests, CI/build behavior, and documentation required by user-visible changes.
+%s
 - Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
 - Do not edit files; write only the review report.
 %s
 
 Required report format:
 1. Start with exactly one verdict line: "Block", "Approve with fixes", or "No blocking findings".
-2. Add "Diff summary" with the base/ref reviewed and the major subsystems touched.
-3. Add "Areas checked" with concise bullets for the touched subsystems and risk classes checked.
-4. Add "Areas not checked / limits" for any subsystem, dependency surface, test path, or runtime behavior not deeply verified.
-5. Add "Findings" in priority order. If there are no findings, say "None".
-6. Add "Tests to run" with the smallest useful validation commands.
+2. Add "Review Scope" with base, head, review type, profile, policy files considered, changed files reviewed, and checks performed.
+3. Add "Diff summary" with the base/ref reviewed and the major subsystems touched.
+4. Add "Areas checked" with concise bullets for the touched subsystems and risk classes checked.
+5. Add "Areas not checked / limits" for any subsystem, dependency surface, test path, or runtime behavior not deeply verified.
+6. Add "Findings" in priority order. If there are no findings, say "None".
+7. Add "Tests to run" with the smallest useful validation commands.
 
-Report concrete P0, P1, and P2 issues. Do not invent speculative issues without an execution path.%s`, base, diffCommand(base, opts.Ignore), profilePrompt(opts), reviewMetadata(opts))
+Report concrete P0, P1, and P2 issues. For pr-readiness and strict profiles, also report concrete actionable P3 developer-workflow or release-readiness issues. For repo-policy, report concrete policy conflicts at the appropriate severity. Do not invent speculative issues without an execution path.%s`, base, diffCommand(base, opts.Ignore), policyContextPrompt(), profilePrompt(opts), reviewMetadata(opts))
 }
 
 func reviewInstructions(opts LocalOptions) string {
@@ -170,18 +172,20 @@ Review scope:
 - Inspect the requested branch diff or full repository scope, then identify the major subsystems touched before writing findings.
 - Read relevant surrounding code for each high-risk subsystem instead of only isolated diff hunks.
 - Focus on correctness, security/privacy, behavior regressions, API or CLI contract changes, persistence/migration risk, concurrency, error handling, tests, CI/build behavior, deployment/runtime behavior, and documentation required by user-visible changes.
+- Read repository policy context before writing findings. Always check AGENTS.md and docs/code_review.md when present. If this branch changes .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md, or other review/setup policy docs, verify the rest of the branch complies with those changed rules.
 - Avoid style-only comments unless they hide a defect or violate an explicit formatter/linter contract.
 - Do not edit files; write only the review report.
 
 Required report format:
 1. Start with exactly one verdict line: "Block", "Approve with fixes", or "No blocking findings".
-2. Add "Diff summary" with the base/ref reviewed, approximate changed-file count if available, and the major subsystems touched.
-3. Add "Areas checked" with a concise bullet for every touched subsystem you inspected and the risk classes checked there.
-4. Add "Areas not checked / limits" for any subsystem, generated artifact, dependency surface, test path, or runtime behavior not deeply verified. Say "None" only if you actually checked all relevant areas.
-5. Add "Findings" in priority order. For each finding include severity, title, file/line evidence, failure path, why it matters, and a small suggested fix or targeted test.
-6. Add "Tests to run" with the smallest useful validation commands.
+2. Add "Review Scope" with base, head, review type, profile, policy files considered, changed files reviewed, and checks performed.
+3. Add "Diff summary" with the base/ref reviewed, approximate changed-file count if available, and the major subsystems touched.
+4. Add "Areas checked" with a concise bullet for every touched subsystem you inspected and the risk classes checked there.
+5. Add "Areas not checked / limits" for any subsystem, generated artifact, dependency surface, test path, or runtime behavior not deeply verified. Say "None" only if you actually checked all relevant areas.
+6. Add "Findings" in priority order. For each finding include severity, title, file/line evidence, failure path, why it matters, and a small suggested fix or targeted test.
+7. Add "Tests to run" with the smallest useful validation commands.
 
-Do not stop after the first few findings. Report every concrete P0, P1, and P2 issue found, but do not invent speculative issues without an execution path.`
+Do not stop after the first few findings. Report every concrete P0, P1, and P2 issue found. Also report concrete actionable P3 developer-workflow or release-readiness issues when the selected profile asks for them, but do not invent speculative issues without an execution path.`
 
 func diffCommand(base string, ignore []string) string {
 	parts := []string{"git diff", base + "...HEAD"}
@@ -196,12 +200,18 @@ func diffCommand(base string, ignore []string) string {
 func profilePrompt(opts LocalOptions) string {
 	switch opts.Profile {
 	case "pr-readiness":
-		return "- PR-readiness profile: assess whether this branch is ready for review or merge, including user-visible behavior, tests, docs, CI/build impact, and rollout risk."
+		return "- PR-readiness profile: assess whether this branch is ready for review or merge, including user-visible behavior, tests, docs, CI/build impact, introduced TODOs and task-tracking rules, hook/workflow setup, config/default/flag consistency, naming consistency, and rollout risk. Report concrete P3 findings when they affect developer workflow or release readiness."
 	case "repo-policy":
-		return "- Repo-policy profile: compare the branch against repository policy and call out concrete policy conflicts. If a policy file is provided, read it before writing findings."
+		return "- Repo-policy profile: compare the branch against repository policy and call out concrete policy conflicts. Read AGENTS.md and docs/code_review.md when present, read the policy file when one is provided, and inspect changed .codex/rules/** and .claude/rules/** files before writing findings."
+	case "strict":
+		return "- Strict profile: combine standard defect review with the PR-readiness and repo-policy passes. Be more willing to report concrete actionable P3 findings for developer workflow, repository policy, config/default/flag consistency, naming consistency, hook/workflow setup, and release readiness."
 	default:
 		return "- Standard profile: prioritize concrete defects and material review gaps."
 	}
+}
+
+func policyContextPrompt() string {
+	return "- Read repository policy context before writing findings. Always check AGENTS.md and docs/code_review.md when present. If this branch changes .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md, or other review/setup policy docs, verify the rest of the branch complies with those changed rules."
 }
 
 func reviewMetadata(opts LocalOptions) string {
@@ -210,10 +220,14 @@ func reviewMetadata(opts LocalOptions) string {
 	if profile == "" {
 		profile = "standard"
 	}
-	lines = append(lines, "", "Report scope metadata:")
+	lines = append(lines, "", "Review Scope metadata to include in the report:")
 	lines = append(lines, "- base: "+opts.Base)
 	lines = append(lines, "- head: HEAD")
+	lines = append(lines, "- review type: branch")
 	lines = append(lines, "- profile: "+profile)
+	lines = append(lines, "- default policy files to check when present: AGENTS.md, docs/code_review.md")
+	lines = append(lines, "- changed policy globs to check when present: .codex/rules/**, .claude/rules/**, AGENTS.md, docs/code_review.md")
+	lines = append(lines, "- checks: "+reviewChecks(profile))
 	if opts.PolicyFile != "" {
 		lines = append(lines, "- policy file: "+opts.PolicyFile)
 		lines = append(lines, "Read the policy file and include any policy-specific limits in the report.")
@@ -223,6 +237,19 @@ func reviewMetadata(opts LocalOptions) string {
 		lines = append(lines, "Treat ignored globs as outside diff-review scope unless surrounding context is needed for a finding.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func reviewChecks(profile string) string {
+	switch profile {
+	case "pr-readiness":
+		return "correctness/security, tests/coverage, CI/release workflows, repo rule context, developer workflow consistency, release readiness"
+	case "repo-policy":
+		return "correctness/security, tests/coverage, CI/build behavior, repo rule compliance"
+	case "strict":
+		return "correctness/security, tests/coverage, CI/release workflows, repo rule compliance, developer workflow consistency, release readiness"
+	default:
+		return "correctness/security, tests/coverage, CI/build behavior, repo rule context"
+	}
 }
 
 func warnIgnoredScope(out io.Writer, opts LocalOptions) {
