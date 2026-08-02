@@ -11,9 +11,8 @@ For kind:
 make kind-load-images
 ```
 
-For a real cluster, publish the runner image and update
-`deploy/k8s/codex-reviewer-api.yaml` to use the published runner and sidecar
-image tags.
+For a real cluster, publish the runner image and pass the published runner and
+sidecar image tags through `RUNNER_IMAGE` and `SIDECAR_IMAGE`.
 
 ## Secrets
 
@@ -38,33 +37,44 @@ When a review Job receives `CODEX_AUTH`, the runner writes it to
 `$CODEX_HOME/auth.json` with mode `0600` and unsets `CODEX_API_KEY` and
 `OPENAI_API_KEY` before invoking Codex.
 
-To use device auth in the API Deployment, change the API args from:
+When `CODEX_AUTH` is set, `make deploy-k8s` defaults `AUTH_MODE=codex` and the
+chart configures Jobs with `--codex-auth-secret=codex-auth`. Without
+`CODEX_AUTH`, it defaults to `AUTH_MODE=openai` and configures
+`--openai-secret=openai-api`.
 
-```yaml
-- --openai-secret=openai-api
+You can override the auth mode and secret names explicitly:
+
+```bash
+AUTH_MODE=codex \
+CODEX_AUTH_SECRET=codex-auth \
+CODEX_AUTH_SECRET_KEY=auth.json \
+make deploy-k8s
 ```
 
-to:
-
-```yaml
-- --codex-auth-secret=codex-auth
-```
-
-Keep `--github-secret=github-token` for private repositories.
+Keep `GITHUB_SECRET=github-token` for private repositories.
 
 ## Deploy
 
 For kind:
 
 ```bash
+make helm-lint
 make deploy-k8s
 kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deploy/codex-reviewer-api
 ```
 
-For manual apply:
+For manual Helm deployment:
 
 ```bash
-kubectl -n codex-reviewer apply -f deploy/k8s/codex-reviewer-api.yaml
+helm upgrade --install codex-reviewer deploy/helm/codex-reviewer \
+  --namespace codex-reviewer \
+  --create-namespace \
+  --set-string image.fullOverride=ghcr.io/markcallen/codex-reviewer:latest \
+  --set-string reviewerJob.image.fullOverride=ghcr.io/markcallen/codex-reviewer:latest \
+  --set-string reviewerJob.sidecarImage.fullOverride=openai-egress:phase1 \
+  --set-string auth.mode=codex \
+  --set-string auth.codexAuthSecret.name=codex-auth \
+  --set-string github.secret.name=github-token
 ```
 
 ## Local Access

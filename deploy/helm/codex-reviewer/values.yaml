@@ -1,0 +1,55 @@
+replicaCount: 1
+
+image:
+  fullOverride: ""
+  repository: codex-reviewer
+  tag: phase1
+  pullPolicy: IfNotPresent
+
+reviewerJob:
+  image:
+    fullOverride: ""
+    repository: codex-reviewer
+    tag: phase1
+  sidecarImage:
+    fullOverride: ""
+    repository: openai-egress
+    tag: phase1
+  activeDeadlineSeconds: 3600
+  ttlSeconds: 3600
+  proxyURL: ""
+
+auth:
+  # Valid values: openai, codex
+  mode: openai
+  openaiSecret:
+    name: openai-api
+    key: api-key
+  codexAuthSecret:
+    name: codex-auth
+    key: auth.json
+
+github:
+  secret:
+    name: github-token
+    key: token
+
+serviceAccount:
+  create: true
+  name: codex-reviewer
+
+rbac:
+  create: true
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources: {}
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

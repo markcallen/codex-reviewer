@@ -1,0 +1,88 @@
+{{- $authMode := required "auth.mode is required" .Values.auth.mode -}}
+{{- if and (ne $authMode "openai") (ne $authMode "codex") -}}
+{{- fail "auth.mode must be either openai or codex" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "codex-reviewer.fullname" . }}
+  labels:
+    {{- include "codex-reviewer.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "codex-reviewer.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+      labels:
+        {{- include "codex-reviewer.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "codex-reviewer.serviceAccountName" . }}
+      containers:
+        - name: api
+          image: {{ include "codex-reviewer.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - codex-reviewer
+            - service
+            - api
+            - --listen=:8080
+            - --namespace=$(POD_NAMESPACE)
+            - --reviewer-image={{ include "codex-reviewer.reviewerJobImage" . }}
+            - --sidecar-image={{ include "codex-reviewer.sidecarImage" . }}
+            - --service-account={{ include "codex-reviewer.serviceAccountName" . }}
+            {{- if eq $authMode "codex" }}
+            - --codex-auth-secret={{ required "auth.codexAuthSecret.name is required when auth.mode=codex" .Values.auth.codexAuthSecret.name }}
+            - --codex-auth-secret-key={{ required "auth.codexAuthSecret.key is required when auth.mode=codex" .Values.auth.codexAuthSecret.key }}
+            {{- else }}
+            - --openai-secret={{ required "auth.openaiSecret.name is required when auth.mode=openai" .Values.auth.openaiSecret.name }}
+            - --openai-secret-key={{ required "auth.openaiSecret.key is required when auth.mode=openai" .Values.auth.openaiSecret.key }}
+            {{- end }}
+            {{- if .Values.github.secret.name }}
+            - --github-secret={{ .Values.github.secret.name }}
+            - --github-secret-key={{ .Values.github.secret.key }}
+            {{- end }}
+            {{- if .Values.reviewerJob.proxyURL }}
+            - --proxy-url={{ .Values.reviewerJob.proxyURL }}
+            {{- end }}
+            - --active-deadline-seconds={{ .Values.reviewerJob.activeDeadlineSeconds }}
+            - --ttl-seconds={{ .Values.reviewerJob.ttlSeconds }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

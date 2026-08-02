@@ -19,6 +19,9 @@ NAMESPACE ?= codex-reviewer-e2e
 SERVICE_ACCOUNT ?= codex-reviewer
 RUNNER_IMAGE ?= codex-reviewer:phase1
 SIDECAR_IMAGE ?= openai-egress:phase1
+HELM_RELEASE ?= codex-reviewer
+HELM_CHART ?= deploy/helm/codex-reviewer
+AUTH_MODE ?= $(if $(CODEX_AUTH),codex,openai)
 GHCR_IMAGE ?= ghcr.io/markcallen/codex-reviewer
 GHCR_TAG ?= $(VERSION)
 GHCR_RUNNER_IMAGE ?= $(GHCR_IMAGE):$(GHCR_TAG)
@@ -36,7 +39,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-push-runner docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -57,7 +60,8 @@ help:
 		'  make deps               Install dev tools and download Go modules' \
 		'  make check-deps         Verify local dev tools and versions' \
 		'  make setup-e2e          Prepare kind cluster, namespace, images, and secrets' \
-		'  make deploy-k8s         Deploy the review API, RBAC, and service to Kubernetes' \
+		'  make helm-lint          Lint and render the Kubernetes Helm chart' \
+		'  make deploy-k8s         Deploy the review API Helm chart to Kubernetes' \
 		'  make install-k8s-skill  Install the Kubernetes review skill for Codex and Claude' \
 		'  make docker-build-runner Build the local reviewer container image' \
 		'  make docker-tag-runner   Tag the reviewer image for GHCR' \
@@ -83,6 +87,9 @@ help:
 		'  NAMESPACE=$(NAMESPACE)' \
 		'  RUNNER_IMAGE=$(RUNNER_IMAGE)' \
 		'  SIDECAR_IMAGE=$(SIDECAR_IMAGE)' \
+		'  HELM_RELEASE=$(HELM_RELEASE)' \
+		'  HELM_CHART=$(HELM_CHART)' \
+		'  AUTH_MODE=$(AUTH_MODE)' \
 		'  GHCR_RUNNER_IMAGE=$(GHCR_RUNNER_IMAGE)' \
 		'  GHCR_PULL_RUNNER_IMAGE=$(GHCR_PULL_RUNNER_IMAGE)' \
 		'  REVIEW_ARGS=$(REVIEW_ARGS)' \
@@ -224,8 +231,38 @@ kind-secrets: kind-namespace
 			--from-file="$(GITHUB_SECRET_KEY)=$$tmpdir/github" \
 			--dry-run=client -o yaml | kubectl --context "$(KUBE_CONTEXT)" apply -f -
 
-deploy-k8s: build k8s-namespace k8s-service-account
-	kubectl --context "$(KUBE_CONTEXT)" -n "$(NAMESPACE)" apply -f deploy/k8s/codex-reviewer-api.yaml
+helm-lint:
+	helm lint "$(HELM_CHART)"
+	helm template "$(HELM_RELEASE)" "$(HELM_CHART)" \
+		--namespace "$(NAMESPACE)" \
+		--set-string image.fullOverride="$(RUNNER_IMAGE)" \
+		--set-string reviewerJob.image.fullOverride="$(RUNNER_IMAGE)" \
+		--set-string reviewerJob.sidecarImage.fullOverride="$(SIDECAR_IMAGE)" \
+		--set-string serviceAccount.name="$(SERVICE_ACCOUNT)" \
+		--set-string auth.mode="$(AUTH_MODE)" \
+		--set-string auth.openaiSecret.name="$(OPENAI_SECRET)" \
+		--set-string auth.openaiSecret.key="$(OPENAI_SECRET_KEY)" \
+		--set-string auth.codexAuthSecret.name="$(CODEX_AUTH_SECRET)" \
+		--set-string auth.codexAuthSecret.key="$(CODEX_AUTH_SECRET_KEY)" \
+		--set-string github.secret.name="$(GITHUB_SECRET)" \
+		--set-string github.secret.key="$(GITHUB_SECRET_KEY)" >/dev/null
+
+deploy-k8s: build
+	helm upgrade --install "$(HELM_RELEASE)" "$(HELM_CHART)" \
+		--kube-context "$(KUBE_CONTEXT)" \
+		--namespace "$(NAMESPACE)" \
+		--create-namespace \
+		--set-string image.fullOverride="$(RUNNER_IMAGE)" \
+		--set-string reviewerJob.image.fullOverride="$(RUNNER_IMAGE)" \
+		--set-string reviewerJob.sidecarImage.fullOverride="$(SIDECAR_IMAGE)" \
+		--set-string serviceAccount.name="$(SERVICE_ACCOUNT)" \
+		--set-string auth.mode="$(AUTH_MODE)" \
+		--set-string auth.openaiSecret.name="$(OPENAI_SECRET)" \
+		--set-string auth.openaiSecret.key="$(OPENAI_SECRET_KEY)" \
+		--set-string auth.codexAuthSecret.name="$(CODEX_AUTH_SECRET)" \
+		--set-string auth.codexAuthSecret.key="$(CODEX_AUTH_SECRET_KEY)" \
+		--set-string github.secret.name="$(GITHUB_SECRET)" \
+		--set-string github.secret.key="$(GITHUB_SECRET_KEY)"
 
 install-k8s-skill:
 	scripts/install-k8s-code-review-skill.sh both
