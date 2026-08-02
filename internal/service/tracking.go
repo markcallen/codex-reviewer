@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -89,22 +88,11 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 }
 
 func verdictFromReport(report []byte) string {
-	firstLine := ""
-	for _, line := range strings.Split(string(report), "\n") {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
-		if line != "" {
-			firstLine = line
-			break
-		}
-	}
-	switch strings.ToLower(firstLine) {
-	case "block":
-		return "block"
-	case "approve with fixes":
-		return "approve_with_fixes"
-	case "no blocking findings":
-		return "no_blocking_findings"
-	default:
+	if len(report) == 0 {
 		return ""
 	}
+	if verdict := ParseVerdict(report); verdict != "unknown" {
+		return verdict
+	}
+	return ""
 }

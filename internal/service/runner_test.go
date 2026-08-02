@@ -362,6 +362,9 @@ func TestRunReviewJobInstallsCodexAuthFromEnv(t *testing.T) {
 	if !strings.Contains(authFile, "device-token") {
 		t.Fatalf("auth.json missing CODEX_AUTH content: %q", authFile)
 	}
+	if got := os.Getenv("CODEX_AUTH"); got != "" {
+		t.Fatalf("CODEX_AUTH = %q, want unset", got)
+	}
 	if got := os.Getenv("CODEX_API_KEY"); got != "" {
 		t.Fatalf("CODEX_API_KEY = %q, want unset", got)
 	}
@@ -428,6 +431,8 @@ func TestParseVerdictFile(t *testing.T) {
 		{name: "block", body: "# Block\n", want: "block"},
 		{name: "approve with fixes", body: "Approve with fixes\n", want: "approve_with_fixes"},
 		{name: "no blocking findings", body: "# No blocking findings\n", want: "no_blocking_findings"},
+		{name: "indented heading", body: "  # Block\n", want: "block"},
+		{name: "prefix with reason", body: "Block (missing auth test)\n", want: "block"},
 		{name: "unknown", body: "Looks fine\n", want: "unknown"},
 	}
 	for _, tt := range tests {

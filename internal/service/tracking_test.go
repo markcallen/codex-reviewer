@@ -23,7 +23,7 @@ func TestTrackReviewWritesRecordAndReport(t *testing.T) {
 			JobName:   "codex-review-review-123",
 			ReportURL: "/reviews/review-123/report",
 		},
-		Report: []byte("No blocking findings\n\nChecked auth.\n"),
+		Report: []byte("  # No blocking findings (checked auth)\n\nChecked auth.\n"),
 		Now:    func() time.Time { return time.Date(2026, 8, 2, 1, 2, 3, 0, time.UTC) },
 	})
 	if err != nil {

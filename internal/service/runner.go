@@ -221,6 +221,7 @@ func installCodexAuthFromEnv() error {
 	if err := os.WriteFile(authPath, []byte(auth+"\n"), 0o600); err != nil {
 		return fmt.Errorf("write Codex auth file: %w", err)
 	}
+	_ = os.Unsetenv("CODEX_AUTH")
 	_ = os.Unsetenv("CODEX_API_KEY")
 	_ = os.Unsetenv("OPENAI_API_KEY")
 	return nil
@@ -379,6 +380,10 @@ func ParseVerdictFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read review report: %w", err)
 	}
+	return ParseVerdict(data), nil
+}
+
+func ParseVerdict(data []byte) string {
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
 		if line == "" {
@@ -386,16 +391,16 @@ func ParseVerdictFile(path string) (string, error) {
 		}
 		switch {
 		case strings.HasPrefix(line, "Block"):
-			return "block", nil
+			return "block"
 		case strings.HasPrefix(line, "Approve with fixes"):
-			return "approve_with_fixes", nil
+			return "approve_with_fixes"
 		case strings.HasPrefix(line, "No blocking findings"):
-			return "no_blocking_findings", nil
+			return "no_blocking_findings"
 		default:
-			return "unknown", nil
+			return "unknown"
 		}
 	}
-	return "unknown", nil
+	return "unknown"
 }
 
 func writeMetadata(path string, metadata ReviewMetadata) error {
