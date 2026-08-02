@@ -8,17 +8,22 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+
+	"github.com/markcallen/codex-reviewer/internal/reviewer"
 )
 
 type ReviewRequest struct {
-	RepoURL      string  `json:"repo_url"`
-	BaseRef      string  `json:"base_ref"`
-	HeadRef      string  `json:"head_ref"`
-	HeadSHA      string  `json:"head_sha"`
-	ProfileName  string  `json:"profile"`
-	Profile      Profile `json:"profile_config"`
-	Instructions string  `json:"instructions,omitempty"`
-	ReturnFormat string  `json:"return_format"`
+	RepoURL      string   `json:"repo_url"`
+	BaseRef      string   `json:"base_ref"`
+	HeadRef      string   `json:"head_ref"`
+	HeadSHA      string   `json:"head_sha"`
+	ProfileName  string   `json:"profile"`
+	Profile      Profile  `json:"profile_config"`
+	Instructions string   `json:"instructions,omitempty"`
+	Directives   []string `json:"directives,omitempty"`
+	Ignore       []string `json:"ignore,omitempty"`
+	PolicyFile   string   `json:"policy_file,omitempty"`
+	ReturnFormat string   `json:"return_format"`
 }
 
 type SubmitOptions struct {
@@ -29,6 +34,9 @@ type SubmitOptions struct {
 	HeadSHA          string
 	ProfileName      string
 	Instructions     string
+	Directives       []string
+	Ignore           []string
+	PolicyFile       string
 	ReturnFormat     string
 	RequireCleanTree bool
 }
@@ -37,14 +45,27 @@ func BuildReviewRequest(ctx context.Context, opts SubmitOptions) (ReviewRequest,
 	if opts.Dir == "" {
 		opts.Dir = "."
 	}
+	cfg, _ := loadSubmitRepoConfig(ctx, opts.Dir)
 	if opts.BaseRef == "" {
-		opts.BaseRef = "origin/main"
+		opts.BaseRef = firstNonEmpty(cfg.Base, "origin/main")
 	}
 	if opts.HeadRef == "" {
 		opts.HeadRef = "HEAD"
 	}
 	if opts.ReturnFormat == "" {
 		opts.ReturnFormat = "markdown"
+	}
+	if opts.ProfileName == "" {
+		opts.ProfileName = cfg.Profile
+	}
+	if len(opts.Directives) == 0 {
+		opts.Directives = cfg.Directives
+	}
+	if len(opts.Ignore) == 0 {
+		opts.Ignore = cfg.Ignore
+	}
+	if opts.PolicyFile == "" {
+		opts.PolicyFile = cfg.PolicyFile
 	}
 
 	profile, err := ResolveProfile(opts.ProfileName)
@@ -94,8 +115,38 @@ func BuildReviewRequest(ctx context.Context, opts SubmitOptions) (ReviewRequest,
 		ProfileName:  opts.ProfileName,
 		Profile:      profile,
 		Instructions: strings.TrimSpace(opts.Instructions),
+		Directives:   cleanStringList(opts.Directives),
+		Ignore:       cleanStringList(opts.Ignore),
+		PolicyFile:   strings.TrimSpace(opts.PolicyFile),
 		ReturnFormat: opts.ReturnFormat,
 	}, nil
+}
+
+func loadSubmitRepoConfig(ctx context.Context, dir string) (reviewer.RepoConfig, bool) {
+	cfg, found, err := reviewer.LoadRepoConfigForDir(ctx, dir, false)
+	if err != nil {
+		return reviewer.RepoConfig{}, false
+	}
+	return cfg, found
+}
+
+func cleanStringList(values []string) []string {
+	var out []string
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (r ReviewRequest) JSON() ([]byte, error) {

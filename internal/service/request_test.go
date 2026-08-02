@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,6 +64,82 @@ func TestBuildReviewRequestDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildReviewRequestUsesRepoConfigDefaults(t *testing.T) {
+	dir := initRequestGitRepo(t)
+	writeRequestFile(t, dir, ".codex-reviewer.toml", `version = "v1.2.3"
+
+[review]
+base = "origin/release"
+profile = "pr-readiness"
+directives = ["Focus public APIs.", "Check release notes."]
+ignore = ["dist/**", "vendor/**"]
+policy_file = "docs/review-policy.md"
+`)
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		Dir:              dir,
+		RepoURL:          "git@github.com:org/repo.git",
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.BaseRef != "origin/release" {
+		t.Fatalf("BaseRef = %q", req.BaseRef)
+	}
+	if req.ProfileName != "pr-readiness" || req.Profile.Name != "pr-readiness" {
+		t.Fatalf("unexpected profile: %#v", req)
+	}
+	if strings.Join(req.Directives, "|") != "Focus public APIs.|Check release notes." {
+		t.Fatalf("Directives = %#v", req.Directives)
+	}
+	if strings.Join(req.Ignore, "|") != "dist/**|vendor/**" {
+		t.Fatalf("Ignore = %#v", req.Ignore)
+	}
+	if req.PolicyFile != "docs/review-policy.md" {
+		t.Fatalf("PolicyFile = %q", req.PolicyFile)
+	}
+}
+
+func TestBuildReviewRequestExplicitValuesOverrideRepoConfig(t *testing.T) {
+	dir := initRequestGitRepo(t)
+	writeRequestFile(t, dir, ".codex-reviewer.toml", `version = "v1.2.3"
+
+[review]
+base = "origin/release"
+profile = "pr-readiness"
+directives = ["Config directive."]
+ignore = ["dist/**"]
+policy_file = "docs/config-policy.md"
+`)
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		Dir:              dir,
+		RepoURL:          "git@github.com:org/repo.git",
+		BaseRef:          "origin/main",
+		HeadSHA:          "abc123",
+		ProfileName:      "security",
+		Directives:       []string{"Explicit directive."},
+		Ignore:           []string{"generated/**"},
+		PolicyFile:       "docs/explicit-policy.md",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.BaseRef != "origin/main" || req.ProfileName != "security" {
+		t.Fatalf("explicit base/profile not honored: %#v", req)
+	}
+	if strings.Join(req.Directives, "|") != "Explicit directive." {
+		t.Fatalf("Directives = %#v", req.Directives)
+	}
+	if strings.Join(req.Ignore, "|") != "generated/**" {
+		t.Fatalf("Ignore = %#v", req.Ignore)
+	}
+	if req.PolicyFile != "docs/explicit-policy.md" {
+		t.Fatalf("PolicyFile = %q", req.PolicyFile)
+	}
+}
+
 func TestBuildReviewRequestScrubsCredentialedURL(t *testing.T) {
 	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
 		RepoURL:          "https://token:secret@github.com/org/repo.git",
@@ -118,12 +196,15 @@ func TestReviewRequestJSONIncludesProfileConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildReviewRequest() error = %v", err)
 	}
+	req.Directives = []string{"Focus auth."}
+	req.Ignore = []string{"dist/**"}
+	req.PolicyFile = "docs/review-policy.md"
 	data, err := req.JSON()
 	if err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
 	got := string(data)
-	for _, want := range []string{`"repo_url"`, `"profile_config"`, `"agent"`, `"model"`} {
+	for _, want := range []string{`"repo_url"`, `"profile_config"`, `"agent"`, `"model"`, `"directives"`, `"ignore"`, `"policy_file"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("JSON() missing %s:\n%s", want, got)
 		}
@@ -162,4 +243,15 @@ func initRequestGitRepo(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+func writeRequestFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
 }

@@ -218,6 +218,17 @@ func writeTestScript(t *testing.T, path, content string) {
 	}
 }
 
+func writeRunnerFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+}
+
 func TestRunReviewJobWritesFailureMetadata(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	out := t.TempDir()
@@ -392,9 +403,68 @@ func TestDecodeReviewRequestRejectsUnknownFields(t *testing.T) {
 func TestReviewPromptIncludesAdditionalInstructions(t *testing.T) {
 	req := testRunnerRequest(t)
 	req.Instructions = "Focus on migrations."
+	req.Directives = []string{"Check generated code boundaries."}
+	req.Ignore = []string{"dist/**", "vendor/**"}
+	req.PolicyFile = "docs/review-policy.md"
 	prompt := reviewPrompt(req)
-	if !strings.Contains(prompt, "code_reviewer") || !strings.Contains(prompt, "Focus on migrations.") {
-		t.Fatalf("reviewPrompt() = %q", prompt)
+	for _, want := range []string{
+		"code_reviewer",
+		"Focus on migrations.",
+		"Check generated code boundaries.",
+		"dist/**, vendor/**",
+		"advisory exclusions",
+		"docs/review-policy.md",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("reviewPrompt() missing %q: %q", want, prompt)
+		}
+	}
+}
+
+func TestMergeRunnerRepoConfigFillsMissingPromptContext(t *testing.T) {
+	workspace := t.TempDir()
+	writeRunnerFile(t, workspace, ".codex-reviewer.toml", `version = "v1.2.3"
+
+[review]
+directives = ["Check release workflow."]
+ignore = ["dist/**"]
+policy_file = "docs/review-policy.md"
+`)
+	req := testRunnerRequest(t)
+	got := mergeRunnerRepoConfig(req, workspace)
+	if strings.Join(got.Directives, "|") != "Check release workflow." {
+		t.Fatalf("Directives = %#v", got.Directives)
+	}
+	if strings.Join(got.Ignore, "|") != "dist/**" {
+		t.Fatalf("Ignore = %#v", got.Ignore)
+	}
+	if got.PolicyFile != "docs/review-policy.md" {
+		t.Fatalf("PolicyFile = %q", got.PolicyFile)
+	}
+}
+
+func TestMergeRunnerRepoConfigKeepsExplicitPromptContext(t *testing.T) {
+	workspace := t.TempDir()
+	writeRunnerFile(t, workspace, ".codex-reviewer.toml", `version = "v1.2.3"
+
+[review]
+directives = ["Config directive."]
+ignore = ["dist/**"]
+policy_file = "docs/config-policy.md"
+`)
+	req := testRunnerRequest(t)
+	req.Directives = []string{"Explicit directive."}
+	req.Ignore = []string{"generated/**"}
+	req.PolicyFile = "docs/explicit-policy.md"
+	got := mergeRunnerRepoConfig(req, workspace)
+	if strings.Join(got.Directives, "|") != "Explicit directive." {
+		t.Fatalf("Directives = %#v", got.Directives)
+	}
+	if strings.Join(got.Ignore, "|") != "generated/**" {
+		t.Fatalf("Ignore = %#v", got.Ignore)
+	}
+	if got.PolicyFile != "docs/explicit-policy.md" {
+		t.Fatalf("PolicyFile = %q", got.PolicyFile)
 	}
 }
 

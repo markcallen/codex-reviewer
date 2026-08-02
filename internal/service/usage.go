@@ -33,6 +33,9 @@ func EstimateReviewUsage(ctx context.Context, dir string, req ReviewRequest) Rev
 		req.Profile.Prompt,
 		req.Profile.ReasoningEffort,
 		req.Instructions,
+		strings.Join(req.Directives, "\n"),
+		strings.Join(req.Ignore, "\n"),
+		req.PolicyFile,
 		req.ReturnFormat,
 	}, "\n")
 	tokens := usage.EstimateTokens(usage.EstimateInput{

@@ -317,6 +317,13 @@ reviews the ignore list is advisory because Codex can still inspect the
 workspace; the CLI prints a warning in that case. The CLI does not accept
 explicit path arguments today, so it does not hide user-requested paths.
 
+Service review commands also read `.codex-reviewer.toml`. `service submit` and
+`service job-manifest` copy configured base, profile, directives, ignore globs,
+and policy-file context into the service request unless explicit flags override
+them. Remote runners include directives, ignore globs, and policy-file context
+in the prompt; service ignore globs are advisory and are not applied as Git
+pathspec excludes by the runner.
+
 Profiles change branch-review emphasis:
 
 - `standard` prioritizes concrete defects and material review gaps.

@@ -57,6 +57,21 @@ For full-repository reviews, ignore globs are advisory because Codex can still
 inspect the workspace. The CLI prints a warning for that mode. The CLI does not
 accept explicit path arguments today, so it does not hide user-requested paths.
 
+## Service reviews
+
+`service submit` and `service job-manifest` also read `.codex-reviewer.toml`
+from the submitting repository. Configured `base`, `profile`, `directives`,
+`ignore`, and `policy_file` values are copied into the service request when the
+corresponding CLI value is not supplied. Use repeated `--directive` and
+`--ignore` flags, plus `--policy-file`, to override config-provided prompt
+context in service requests.
+
+Remote service runners include request directives, ignore globs, and policy-file
+context in the Codex prompt. Ignore globs are advisory in this path: they tell
+Codex which generated, vendored, dependency, or build-output paths to treat as
+outside ordinary review scope, but the runner does not currently rewrite the
+remote diff command with Git pathspec excludes.
+
 ## Recommendations
 
 Use:
