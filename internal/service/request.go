@@ -142,7 +142,7 @@ func cleanStringList(values []string) []string {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
+		if value = strings.TrimSpace(value); value != "" {
 			return value
 		}
 	}

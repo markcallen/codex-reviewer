@@ -28,7 +28,7 @@ func EstimateReviewUsage(ctx context.Context, dir string, req ReviewRequest) Rev
 			changedFiles = countNonEmptyLines(names)
 		}
 	}
-	prompt := strings.Join([]string{
+	prompt := strings.Join(nonEmptyPromptParts(
 		req.Profile.Agent,
 		req.Profile.Prompt,
 		req.Profile.ReasoningEffort,
@@ -37,7 +37,7 @@ func EstimateReviewUsage(ctx context.Context, dir string, req ReviewRequest) Rev
 		strings.Join(req.Ignore, "\n"),
 		req.PolicyFile,
 		req.ReturnFormat,
-	}, "\n")
+	), "\n")
 	tokens := usage.EstimateTokens(usage.EstimateInput{
 		Model:        req.Profile.Model,
 		Prompt:       prompt,
@@ -64,6 +64,16 @@ func DryRunReviewRequestJSON(ctx context.Context, dir string, req ReviewRequest)
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func nonEmptyPromptParts(values ...string) []string {
+	var out []string
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func countNonEmptyLines(value string) int {

@@ -140,6 +140,12 @@ policy_file = "docs/config-policy.md"
 	}
 }
 
+func TestFirstNonEmptyReturnsTrimmedValue(t *testing.T) {
+	if got := firstNonEmpty("  ", " origin/main "); got != "origin/main" {
+		t.Fatalf("firstNonEmpty() = %q, want origin/main", got)
+	}
+}
+
 func TestBuildReviewRequestScrubsCredentialedURL(t *testing.T) {
 	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
 		RepoURL:          "https://token:secret@github.com/org/repo.git",
