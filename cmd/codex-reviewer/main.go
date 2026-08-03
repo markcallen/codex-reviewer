@@ -565,6 +565,8 @@ func runReview(args []string) {
 		runReviewPrePush(args[1:])
 	case "recommend":
 		runReviewRecommend(args[1:])
+	case "submit":
+		runReviewSubmit(args[1:])
 	case "-h", "--help", "help":
 		reviewUsage()
 	default:
@@ -1057,6 +1059,7 @@ Usage:
   codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
   codex-reviewer review recommend [flags]
+  codex-reviewer review submit [flags]
   codex-reviewer service api [flags]
   codex-reviewer service submit [flags]
   codex-reviewer service status [flags] REVIEW_ID
@@ -1078,6 +1081,7 @@ Usage:
   codex-reviewer review docker [flags]
   codex-reviewer review pre-push [flags]
   codex-reviewer review recommend [flags]
+  codex-reviewer review submit [flags]
 
 `)
 }

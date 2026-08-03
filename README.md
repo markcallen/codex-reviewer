@@ -194,15 +194,31 @@ report = "codex-review/full-review.md"
 k8s_api_url = ""
 ```
 
-To use a Kubernetes-backed review API, set `backend = "k8s"` and configure
-`k8s_api_url`, then run `codex-reviewer service submit`.
+To use a Kubernetes-backed review API, run:
+
+```bash
+export CODEX_AUTH="$(cat ~/.codex/auth.json)"
+export GITHUB_TOKEN=...
+codex-reviewer review submit
+```
+
+`review submit` creates or updates Kubernetes Secrets, deploys the Helm chart
+when an API URL is not already configured, starts a temporary port-forward,
+submits the review, waits for the report, and writes the tracked outcome. If
+the service is already running, set `CODEX_REVIEWER_API_URL` or configure:
+
+```toml
+[codex_reviewer]
+backend = "k8s"
+k8s_api_url = "http://127.0.0.1:8080"
+```
 
 Kubernetes deployment, Codex device-code auth, and shared agent workflow details
 are in [docs/k8s-deploy.md](docs/k8s-deploy.md). When `CODEX_AUTH` is provided
 as the literal JSON from Codex `auth.json`, review Jobs install it as
 `$CODEX_HOME/auth.json` and ignore API-key auth before launching Codex.
 
-`service submit` writes non-secret review records under
+`review submit` and `service submit` write non-secret review records under
 `codex-review/k8s-reviews/<review-id>/record.json` by default. Commit those
 records and the review report when future agents should know which Kubernetes
 review ran and what outcome it produced. Use `--track=false` for intentionally
@@ -331,12 +347,12 @@ reviews the ignore list is advisory because Codex can still inspect the
 workspace; the CLI prints a warning in that case. The CLI does not accept
 explicit path arguments today, so it does not hide user-requested paths.
 
-Service review commands also read `.codex-reviewer.toml`. `service submit` and
-`service job-manifest` copy configured base, profile, directives, ignore globs,
-and policy-file context into the service request unless explicit flags override
-them. Remote runners include directives, ignore globs, and policy-file context
-in the prompt; service ignore globs are advisory and are not applied as Git
-pathspec excludes by the runner.
+Kubernetes review commands also read `.codex-reviewer.toml`. `review submit`,
+`service submit`, and `service job-manifest` copy configured base, profile,
+directives, ignore globs, and policy-file context into the service request
+unless explicit flags override them. Remote runners include directives, ignore
+globs, and policy-file context in the prompt; service ignore globs are advisory
+and are not applied as Git pathspec excludes by the runner.
 
 Profiles change branch-review emphasis:
 

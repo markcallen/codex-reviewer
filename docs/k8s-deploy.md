@@ -3,6 +3,51 @@
 This deploys the `codex-reviewer` API into a Kubernetes namespace and creates
 one Job per submitted review.
 
+## One Command Review
+
+From a committed repository you want reviewed, run:
+
+```bash
+export CODEX_AUTH="$(cat ~/.codex/auth.json)"
+export GITHUB_TOKEN=...
+codex-reviewer review submit
+```
+
+`review submit` builds the review request, creates or updates the Kubernetes
+namespace, creates the required Secrets, deploys the Helm chart when an API URL
+is not already configured, starts a temporary port-forward, submits the review,
+waits for the report, and writes the tracking artifacts.
+
+Use `--dry-run` to inspect the request and planned Kubernetes actions without
+submitting anything:
+
+```bash
+codex-reviewer review submit --dry-run
+```
+
+If you run the command outside the `codex-reviewer` checkout, either set
+`CODEX_REVIEWER_API_URL` for an already-running service or point at the chart:
+
+```bash
+HELM_CHART=/path/to/codex-code-reviewer/deploy/helm/codex-reviewer \
+codex-reviewer review submit
+```
+
+The command uses these defaults, all overrideable with flags or matching
+environment variables:
+
+```text
+KUBE_CONTEXT=kind-codex-reviewer-e2e
+NAMESPACE=codex-reviewer-e2e
+HELM_RELEASE=codex-reviewer
+RUNNER_IMAGE=codex-reviewer:phase1
+SIDECAR_IMAGE=openai-egress:phase1
+AUTH_MODE=auto
+```
+
+`AUTH_MODE=auto` prefers `CODEX_AUTH` or `~/.codex/auth.json`, then falls back
+to `OPENAI_API_KEY`.
+
 ## Build And Load Images
 
 For kind:
@@ -60,7 +105,7 @@ For kind:
 ```bash
 make helm-lint
 make deploy-k8s
-kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deploy/codex-reviewer-api
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deploy/codex-reviewer
 ```
 
 For manual Helm deployment:
@@ -82,18 +127,17 @@ helm upgrade --install codex-reviewer deploy/helm/codex-reviewer \
 Port-forward the API:
 
 ```bash
-kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" port-forward svc/codex-reviewer-api 8080:8080
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" port-forward svc/codex-reviewer 8080:8080
 export CODEX_REVIEWER_API_URL=http://127.0.0.1:8080
 ```
 
 Submit the current committed branch and track the result in git-visible files:
 
 ```bash
-codex-reviewer service submit \
+codex-reviewer review submit \
   --base origin/main \
   --head HEAD \
   --profile standard \
-  --wait \
   --output codex-review/k8s-review.md
 ```
 

@@ -8,7 +8,14 @@ outcome in the repository.
 
 - The repository has a clean working tree. Commit or stash local changes first.
 - `codex-reviewer` is installed on PATH.
-- `CODEX_REVIEWER_API_URL` is set, or Codex global config contains:
+- `CODEX_AUTH` contains the literal contents of `~/.codex/auth.json`, or
+  `~/.codex/auth.json` is readable by the invoking user. `OPENAI_API_KEY` may
+  be used as a fallback.
+- `GITHUB_TOKEN` is set when the Kubernetes Job must clone private
+  repositories.
+- Either `CODEX_REVIEWER_API_URL` is set, Codex global config contains a K8s
+  API URL, or the Helm chart is available at `deploy/helm/codex-reviewer` or
+  through `HELM_CHART`.
 
 ```toml
 [codex_reviewer]
@@ -30,15 +37,19 @@ git rev-parse --verify HEAD
 3. Submit a Kubernetes review and wait for the report:
 
 ```bash
-codex-reviewer service submit \
+codex-reviewer review submit \
   --base origin/main \
   --head HEAD \
   --profile standard \
-  --wait \
   --output codex-review/k8s-review.md
 ```
 
-4. If the review was submitted without `--wait`, refresh it later:
+The command creates or updates Kubernetes Secrets from `CODEX_AUTH`,
+`OPENAI_API_KEY`, and `GITHUB_TOKEN`, deploys the Helm chart when needed, starts
+a temporary port-forward when no API URL is configured, writes the report, and
+updates the tracking record.
+
+4. If the review was submitted with `--wait=false`, refresh it later:
 
 ```bash
 codex-reviewer service status REVIEW_ID
