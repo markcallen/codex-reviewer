@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +41,7 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 	}
 	requireTool(t, "kind")
 	requireTool(t, "kubectl")
+	requireTool(t, "helm")
 	requireTool(t, "gh")
 
 	reviewerImage := requireEnv(t, "CODEX_REVIEWER_REVIEWER_IMAGE")
@@ -60,16 +63,74 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			codexAuthSecret = "codex-auth"
 		}
 		ensureSecretFromEnv(t, ctx, kubeContext, namespace, codexAuthSecret, "auth.json", "CODEX_AUTH")
+		openAISecret = ""
 	} else {
 		if openAISecret == "" {
 			openAISecret = requireEnv(t, "CODEX_REVIEWER_OPENAI_SECRET")
 		}
 		ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+		codexAuthSecret = ""
 	}
 	ensureSecretFromEnv(t, ctx, kubeContext, namespace, githubSecret, "token", "GITHUB_TOKEN")
 
 	fixtures := loadFixtures(t)
 	cases := selectRepos(t, fixtures)
+	if len(cases) > 0 {
+		t.Run("api-"+sanitizeName(cases[0].Name), func(t *testing.T) {
+			branch := defaultBranch(t, ctx, cases[0].Name)
+			req := service.ReviewRequest{
+				RepoURL:      cases[0].URL,
+				BaseRef:      branch.BaseRef,
+				HeadRef:      branch.Name,
+				HeadSHA:      branch.HeadSHA,
+				ProfileName:  "standard",
+				Profile:      mustProfile(t, "standard"),
+				ReturnFormat: "markdown",
+			}
+			release := envDefault("CODEX_REVIEWER_HELM_RELEASE", "codex-reviewer")
+			deployReviewAPI(t, ctx, kubeContext, namespace, release, reviewerImage, sidecarImage, openAISecret, codexAuthSecret, githubSecret)
+			apiURL, stopForward := startPortForward(t, ctx, kubeContext, namespace, release)
+			t.Cleanup(stopForward)
+
+			resp, err := service.Client{BaseURL: apiURL}.Submit(ctx, req)
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			t.Logf("submitted api review id=%s job=%s", resp.ID, resp.JobName)
+			t.Cleanup(func() {
+				deleteJobIfExists(t, context.Background(), kubeContext, namespace, resp.JobName)
+			})
+			report, err := service.Client{BaseURL: apiURL}.WaitReport(ctx, resp.ReportURL, 5*time.Second)
+			if err != nil {
+				t.Fatalf("WaitReport() error = %v", err)
+			}
+			assertReviewRan(t, string(report))
+			status, err := service.Client{BaseURL: apiURL}.Status(ctx, resp.ID)
+			if err != nil {
+				t.Fatalf("Status() error = %v", err)
+			}
+			if status.Status != "succeeded" {
+				t.Fatalf("status before restart = %#v, want succeeded", status)
+			}
+
+			stopForward()
+			restartDeployment(t, ctx, kubeContext, namespace, release)
+			apiURL, stopForward = startPortForward(t, ctx, kubeContext, namespace, release)
+			t.Cleanup(stopForward)
+			status, err = service.Client{BaseURL: apiURL}.Status(ctx, resp.ID)
+			if err != nil {
+				t.Fatalf("Status() after restart error = %v", err)
+			}
+			if status.Status != "succeeded" || status.JobName != resp.JobName {
+				t.Fatalf("status after restart = %#v, want succeeded job %s", status, resp.JobName)
+			}
+			report, err = service.Client{BaseURL: apiURL}.Report(ctx, resp.ReportURL)
+			if err != nil {
+				t.Fatalf("Report() after restart error = %v", err)
+			}
+			assertReviewRan(t, string(report))
+		})
+	}
 	for _, repo := range cases {
 		t.Run(repo.Name, func(t *testing.T) {
 			branch := defaultBranch(t, ctx, repo.Name)
@@ -109,6 +170,96 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			assertReviewRan(t, string(logs))
 		})
 	}
+}
+
+func deployReviewAPI(t *testing.T, ctx context.Context, kubeContext, namespace, release, reviewerImage, sidecarImage, openAISecret, codexAuthSecret, githubSecret string) {
+	t.Helper()
+	authMode := "openai"
+	if codexAuthSecret != "" {
+		authMode = "codex"
+	}
+	chart := envDefault("CODEX_REVIEWER_HELM_CHART", "deploy/helm/codex-reviewer")
+	serviceAccount := envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", "codex-reviewer")
+	args := []string{
+		"upgrade", "--install", release, chart,
+		"--kube-context", kubeContext,
+		"--namespace", namespace,
+		"--create-namespace",
+		"--set-string", "fullnameOverride=" + release,
+		"--set-string", "image.fullOverride=" + reviewerImage,
+		"--set-string", "reviewerJob.image.fullOverride=" + reviewerImage,
+		"--set-string", "reviewerJob.sidecarImage.fullOverride=" + sidecarImage,
+		"--set-string", "serviceAccount.name=" + serviceAccount,
+		"--set-string", "auth.mode=" + authMode,
+		"--set-string", "auth.openaiSecret.name=" + openAISecret,
+		"--set-string", "auth.openaiSecret.key=api-key",
+		"--set-string", "auth.codexAuthSecret.name=" + codexAuthSecret,
+		"--set-string", "auth.codexAuthSecret.key=auth.json",
+		"--set-string", "github.secret.name=" + githubSecret,
+		"--set-string", "github.secret.key=token",
+		"--wait",
+	}
+	run(t, ctx, "", "helm", args...)
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "status", "deployment/"+release, "--timeout=2m")
+}
+
+func startPortForward(t *testing.T, ctx context.Context, kubeContext, namespace, serviceName string) (string, func()) {
+	t.Helper()
+	port := freeLocalPort(t)
+	cmd := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "port-forward", "svc/"+serviceName, strconv.Itoa(port)+":8080")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("kubectl port-forward failed: %v", err)
+	}
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return "http://" + address, stop
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	stop()
+	t.Fatalf("kubectl port-forward did not become ready: %s", strings.TrimSpace(stderr.String()))
+	return "", nil
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free local port: %v", err)
+	}
+	defer listener.Close() //nolint:errcheck
+	_, rawPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort(%s) error = %v", listener.Addr(), err)
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatalf("Atoi(%s) error = %v", rawPort, err)
+	}
+	return port
+}
+
+func restartDeployment(t *testing.T, ctx context.Context, kubeContext, namespace, deployment string) {
+	t.Helper()
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "restart", "deployment/"+deployment)
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "status", "deployment/"+deployment, "--timeout=2m")
 }
 
 func ensureKindCluster(t *testing.T, ctx context.Context, cluster string) {

@@ -2,8 +2,8 @@
 
 The kind e2e test is opt-in and gated behind the `e2e` build tag. For normal
 individual-developer local runs, prefer the Docker/GHCR workflow in
-`docs/docker-ghcr.md`; this kind path exists to exercise the Kubernetes job
-integration.
+`docs/docker-ghcr.md`; this kind path exists to exercise the Kubernetes API and
+Job integration.
 
 By default, `make e2e` reviews one small private repository and one large
 private repository from `e2e/repos.json`. The fixture contains 10 private
@@ -18,10 +18,11 @@ validated without relying on private `markcallen` fixtures.
 
 - `kind`
 - `kubectl`
+- `helm`
 - `gh` authenticated with access to `github.com/markcallen`
 - A review runner image loaded into kind
 - An OpenAI egress sidecar image loaded into kind
-- `OPENAI_API_KEY` set in the local environment
+- `CODEX_AUTH` or `OPENAI_API_KEY` set in the local environment
 - `GITHUB_TOKEN` set in the local environment for private repository clones
 
 ## Environment
@@ -75,11 +76,14 @@ kind load docker-image openai-egress:phase1 --name codex-reviewer-e2e
 
 ```bash
 export RUN_KIND_E2E=1
-export OPENAI_API_KEY=...
+export CODEX_AUTH="$(cat ~/.codex/auth.json)"
+# or:
+# export OPENAI_API_KEY=...
 export GITHUB_TOKEN=...
 export CODEX_REVIEWER_REVIEWER_IMAGE=codex-reviewer:phase1
 export CODEX_REVIEWER_SIDECAR_IMAGE=openai-egress:phase1
 export CODEX_REVIEWER_OPENAI_SECRET=openai-api
+export CODEX_REVIEWER_CODEX_AUTH_SECRET=codex-auth
 export CODEX_REVIEWER_GITHUB_SECRET=github-token
 export CODEX_REVIEWER_NAMESPACE=codex-reviewer-e2e
 export CODEX_REVIEWER_KIND_CLUSTER=codex-reviewer-e2e
@@ -89,6 +93,8 @@ Optional:
 
 ```bash
 export CODEX_REVIEWER_SERVICE_ACCOUNT=codex-reviewer
+export CODEX_REVIEWER_HELM_RELEASE=codex-reviewer
+export CODEX_REVIEWER_HELM_CHART=deploy/helm/codex-reviewer
 ```
 
 ## Run
@@ -106,10 +112,18 @@ go test -v -tags=e2e ./e2e -run TestKindReviewsSmallAndLargePrivateRepos -count=
 
 The test creates a kind cluster if one does not exist, creates the configured
 namespace if needed, creates the configured Kubernetes Secrets from
-`OPENAI_API_KEY` and `GITHUB_TOKEN`, resolves each selected repository's default
-branch and head SHA with `gh`, uses the head commit's parent SHA as the review
-base when available, creates a one-shot Kubernetes Job manifest, applies it,
-waits for the reviewer container to finish, reads the reviewer logs, and asserts
-that a review verdict or report write confirmation was produced.
+`CODEX_AUTH` or `OPENAI_API_KEY` and `GITHUB_TOKEN`, and resolves each selected
+repository's default branch and head SHA with `gh`.
+
+For the first selected repository, the test deploys the Helm chart, submits a
+review through the API, waits for the report, confirms the API reports
+`succeeded`, restarts the API deployment, and verifies the same status and
+report can still be read from Kubernetes Job state and pod logs. This exercises
+the API's direct Kubernetes API client rather than `kubectl` inside the pod.
+
+For each selected repository, the test also creates a one-shot Kubernetes Job
+manifest directly, applies it, waits for the reviewer container to finish, reads
+the reviewer logs, and asserts that a review verdict or report write
+confirmation was produced.
 
 The test skips by default unless `RUN_KIND_E2E=1` is set.
