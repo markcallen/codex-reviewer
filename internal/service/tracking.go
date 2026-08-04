@@ -57,12 +57,13 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 		if reportPath == "" {
 			reportPath = filepath.Join(baseDir, "review.md")
 		}
-		if dir := filepath.Dir(reportPath); dir != "." && dir != "" {
+		writePath := trackedReportWritePath(opts.Dir, reportPath)
+		if dir := filepath.Dir(writePath); dir != "." && dir != "" {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return "", fmt.Errorf("create tracked report directory: %w", err)
 			}
 		}
-		if err := os.WriteFile(reportPath, opts.Report, 0o644); err != nil {
+		if err := os.WriteFile(writePath, opts.Report, 0o644); err != nil {
 			return "", fmt.Errorf("write tracked review report: %w", err)
 		}
 	}
@@ -95,6 +96,13 @@ func TrackReview(opts TrackReviewOptions) (string, error) {
 		return "", fmt.Errorf("write review record: %w", err)
 	}
 	return recordPath, nil
+}
+
+func trackedReportWritePath(baseDir, reportPath string) string {
+	if filepath.IsAbs(reportPath) {
+		return reportPath
+	}
+	return filepath.Join(baseDir, reportPath)
 }
 
 func ReadReviewRecord(path string) (ReviewRecord, error) {

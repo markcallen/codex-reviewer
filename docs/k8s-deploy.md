@@ -48,6 +48,13 @@ AUTH_MODE=auto
 `AUTH_MODE=auto` prefers `CODEX_AUTH` or `~/.codex/auth.json`, then falls back
 to `OPENAI_API_KEY`.
 
+Review Jobs run the OpenAI egress proxy as a native Kubernetes sidecar init
+container (`initContainers[*].restartPolicy=Always`) so the reviewer container
+can finish without keeping the Job alive. Use Kubernetes 1.29 or newer, where
+sidecar containers are stable. Older clusters may reject the manifest or run the
+proxy with normal init-container semantics, which breaks `HTTP_PROXY` and
+`HTTPS_PROXY` for the reviewer.
+
 ## Build And Load Images
 
 For kind:
@@ -79,8 +86,8 @@ make kind-secrets
 - `github-token`, key `token`, when `GITHUB_TOKEN` is set.
 
 When a review Job receives `CODEX_AUTH`, the runner writes it to
-`$CODEX_HOME/auth.json` with mode `0600` and unsets `CODEX_API_KEY` and
-`OPENAI_API_KEY` before invoking Codex.
+`$CODEX_HOME/auth.json` with mode `0600` and unsets `CODEX_AUTH`,
+`CODEX_API_KEY`, and `OPENAI_API_KEY` before invoking Codex.
 
 When `CODEX_AUTH` is set, `make deploy-k8s` defaults `AUTH_MODE=codex` and the
 chart configures Jobs with `--codex-auth-secret=codex-auth`. Without
