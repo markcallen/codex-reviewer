@@ -43,6 +43,7 @@ Choose the package path and tag:
 
 ```bash
 export GHCR_IMAGE=ghcr.io/markcallen/codex-reviewer
+export GHCR_EGRESS_IMAGE=ghcr.io/markcallen/codex-reviewer-egress
 export GHCR_TAG=v0.1.0
 ```
 
@@ -52,16 +53,20 @@ Log in to GHCR with a token that can write packages:
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
 ```
 
-Tag and push:
+Tag and push both the reviewer and egress sidecar images:
 
 ```bash
-make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
+make docker-push-images \
+  GHCR_IMAGE="$GHCR_IMAGE" \
+  GHCR_EGRESS_IMAGE="$GHCR_EGRESS_IMAGE" \
+  GHCR_TAG="$GHCR_TAG"
 ```
 
-The pushed image is:
+The pushed images are:
 
 ```text
 ghcr.io/markcallen/codex-reviewer:v0.1.0
+ghcr.io/markcallen/codex-reviewer-egress:v0.1.0
 ```
 
 ## Run a Local Review from the Image
