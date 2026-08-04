@@ -97,7 +97,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
+	for _, want := range []string{"exec --sandbox danger-full-access review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
@@ -132,9 +132,9 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 	debugLog := readFile(t, debugLogPath)
 	for _, want := range []string{
 		"run started review_id=review-1",
-		"repo_url=git@github.com:org/repo.git",
+		"repo_url=https://github.com/org/repo.git",
 		"command start",
-		"argv=codex exec review",
+		"argv=codex exec --sandbox danger-full-access review",
 		"run succeeded verdict=approve_with_fixes",
 	} {
 		if !strings.Contains(debugLog, want) {
@@ -179,21 +179,24 @@ func TestRunReviewJobExecRunnerIsolatesChildStdout(t *testing.T) {
 	out := t.TempDir()
 	workspace := filepath.Join(t.TempDir(), "workspace")
 
-	// Fake git: always exits 0 without doing anything.
-	writeTestScript(t, filepath.Join(binDir, "git"), "#!/bin/sh\nexit 0\n")
+	// Fake git: create the clone destination so later commands can run in it.
+	writeTestScript(t, filepath.Join(binDir, "git"), `#!/bin/sh
+if [ "$1" = "clone" ]; then
+  mkdir -p "$4"
+fi
+exit 0
+`)
 
 	// Fake codex: emits JSON noise to stdout, then writes the report file.
 	writeTestScript(t, filepath.Join(binDir, "codex"), `#!/bin/sh
 printf '{"type":"usage","usage":{"input_tokens":10}}\n'
-i=0
-while [ "$i" -lt "$#" ]; do
-  i=$((i+1))
-  eval "arg=\$$i"
-  if [ "$arg" = "--output-last-message" ]; then
-    i=$((i+1))
-    eval "rp=\$$i"
-    printf 'Approve with fixes\n\n- P1 fixed\n' > "$rp"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output-last-message" ]; then
+    shift
+    printf 'Approve with fixes\n\n- P1 fixed\n' > "$1"
+    exit 0
   fi
+  shift
 done
 `)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))

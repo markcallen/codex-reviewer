@@ -86,6 +86,7 @@ func (s *APIServer) Handler() http.Handler {
 	mux.HandleFunc("POST /reviews", s.handleCreateReview)
 	mux.HandleFunc("GET /reviews/{id}", s.handleGetReview)
 	mux.HandleFunc("GET /reviews/{id}/report", s.handleGetReport)
+	mux.HandleFunc("GET /", s.handleInfoPage)
 	return mux
 }
 
@@ -104,6 +105,7 @@ func (s *APIServer) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ReviewResponse{Status: "rejected", Error: "decode request: " + err.Error()})
 		return
 	}
+	req.RepoURL = normalizeReviewRepoURL(req.RepoURL)
 	if req.ProfileName == "" {
 		req.ProfileName = "standard"
 	}

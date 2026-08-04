@@ -95,7 +95,7 @@ func BuildReviewRequest(ctx context.Context, opts SubmitOptions) (ReviewRequest,
 		}
 		repoURL = strings.TrimSpace(repoURL)
 	}
-	repoURL = scrubURLCredentials(repoURL)
+	repoURL = normalizeReviewRepoURL(repoURL)
 
 	headSHA := strings.TrimSpace(opts.HeadSHA)
 	if headSHA == "" {
@@ -157,8 +157,25 @@ func (r ReviewRequest) JSON() ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// scrubURLCredentials removes userinfo from http/https URLs. SSH URLs are left
-// intact because the username (e.g. "git") is required for authentication.
+// normalizeReviewRepoURL converts GitHub SSH remotes to HTTPS so Kubernetes
+// review jobs can use the injected GITHUB_TOKEN instead of SSH host keys.
+func normalizeReviewRepoURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "git@github.com:") {
+		path := strings.TrimPrefix(raw, "git@github.com:")
+		if path != "" {
+			return "https://github.com/" + path
+		}
+	}
+	u, err := url.Parse(raw)
+	if err == nil && strings.EqualFold(u.Scheme, "ssh") && strings.EqualFold(u.Hostname(), "github.com") && u.User != nil && u.User.Username() == "git" && u.Path != "" {
+		return "https://github.com" + u.EscapedPath()
+	}
+	return scrubURLCredentials(raw)
+}
+
+// scrubURLCredentials removes userinfo from http/https URLs. Other URL forms
+// are left intact because their userinfo may be part of the transport syntax.
 func scrubURLCredentials(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.User == nil {

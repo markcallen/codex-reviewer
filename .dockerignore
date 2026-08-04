@@ -5,6 +5,8 @@
 bin/
 coverage/
 codex-review/
+web/node_modules/
+web/.vite/
 .cache/
 .tools/
 .idea/
