@@ -69,7 +69,7 @@ jobs:
           context: .
           file: Dockerfile.egress
           push: true
-          tags: ${{ steps.egress-meta.outputs.tags }}
-          labels: ${{ steps.egress-meta.outputs.labels }}
+          tags: ${{ steps['egress-meta'].outputs.tags }}
+          labels: ${{ steps['egress-meta'].outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
