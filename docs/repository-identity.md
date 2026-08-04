@@ -13,7 +13,8 @@ configuration, README badges, release URLs, and published GHCR image path.
 | --- | --- |
 | GitHub repository | `github.com/markcallen/codex-reviewer` |
 | Go module | `github.com/markcallen/codex-reviewer` |
-| GHCR image | `ghcr.io/markcallen/codex-reviewer` |
+| GHCR reviewer image | `ghcr.io/markcallen/codex-reviewer` |
+| GHCR egress sidecar image | `ghcr.io/markcallen/codex-reviewer-egress` |
 | Release URL | `https://github.com/markcallen/codex-reviewer/releases` |
 | CLI binary | `codex-reviewer` |
 | GoReleaser project | `codex-reviewer` |

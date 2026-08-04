@@ -239,9 +239,13 @@ Publish it to GHCR:
 
 ```bash
 export GHCR_IMAGE=ghcr.io/markcallen/codex-reviewer
+export GHCR_EGRESS_IMAGE=ghcr.io/markcallen/codex-reviewer-egress
 export GHCR_TAG=v0.1.0
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
-make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
+make docker-push-images \
+  GHCR_IMAGE="$GHCR_IMAGE" \
+  GHCR_EGRESS_IMAGE="$GHCR_EGRESS_IMAGE" \
+  GHCR_TAG="$GHCR_TAG"
 ```
 
 Run a review from any checked-out repository:

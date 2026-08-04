@@ -41,7 +41,17 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != null && inputs.tag != '' }}
 
+      - id: egress-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}-egress
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != null && inputs.tag != '' }}
+
       - uses: docker/build-push-action@v7
+        name: Build and push reviewer image
         with:
           context: .
           file: Dockerfile.runner
@@ -50,5 +60,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: docker/build-push-action@v7
+        name: Build and push egress sidecar image
+        with:
+          context: .
+          file: Dockerfile.egress
+          push: true
+          tags: ${{ steps['egress-meta'].outputs.tags }}
+          labels: ${{ steps['egress-meta'].outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
