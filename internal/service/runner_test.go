@@ -13,9 +13,10 @@ import (
 )
 
 type recordedCommand struct {
-	Dir  string
-	Name string
-	Args []string
+	Dir   string
+	Name  string
+	Args  []string
+	Input string
 }
 
 type fakeCommandRunner struct {
@@ -26,7 +27,15 @@ type fakeCommandRunner struct {
 }
 
 func (r *fakeCommandRunner) Run(_ context.Context, dir, name string, args ...string) error {
-	r.commands = append(r.commands, recordedCommand{Dir: dir, Name: name, Args: append([]string(nil), args...)})
+	return r.run(dir, "", name, args...)
+}
+
+func (r *fakeCommandRunner) RunWithInput(_ context.Context, dir, input, name string, args ...string) error {
+	return r.run(dir, input, name, args...)
+}
+
+func (r *fakeCommandRunner) run(dir, input, name string, args ...string) error {
+	r.commands = append(r.commands, recordedCommand{Dir: dir, Name: name, Args: append([]string(nil), args...), Input: input})
 	if name == r.failName {
 		if r.failErr != nil {
 			return r.failErr
@@ -88,10 +97,16 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer"} {
+	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
+	}
+	if last.Args[len(last.Args)-1] == "-" {
+		t.Fatalf("codex args should not include positional prompt marker with --base: %v", last.Args)
+	}
+	if !strings.Contains(last.Input, "code_reviewer") {
+		t.Fatalf("codex stdin missing review prompt: %q", last.Input)
 	}
 
 	metadata := readMetadata(t, filepath.Join(out, "metadata.json"))

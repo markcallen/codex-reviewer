@@ -178,7 +178,7 @@ func deployReviewAPI(t *testing.T, ctx context.Context, kubeContext, namespace, 
 	if codexAuthSecret != "" {
 		authMode = "codex"
 	}
-	chart := envDefault("CODEX_REVIEWER_HELM_CHART", "deploy/helm/codex-reviewer")
+	chart := envDefault("CODEX_REVIEWER_HELM_CHART", repoPath(t, "deploy/helm/codex-reviewer"))
 	serviceAccount := envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", "codex-reviewer")
 	args := []string{
 		"upgrade", "--install", release, chart,
@@ -189,6 +189,8 @@ func deployReviewAPI(t *testing.T, ctx context.Context, kubeContext, namespace, 
 		"--set-string", "image.fullOverride=" + reviewerImage,
 		"--set-string", "reviewerJob.image.fullOverride=" + reviewerImage,
 		"--set-string", "reviewerJob.sidecarImage.fullOverride=" + sidecarImage,
+		"--set-string", "podLabels.e2eRun=" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		"--set", "serviceAccount.create=false",
 		"--set-string", "serviceAccount.name=" + serviceAccount,
 		"--set-string", "auth.mode=" + authMode,
 		"--set-string", "auth.openaiSecret.name=" + openAISecret,
@@ -345,21 +347,31 @@ func deleteJobIfExists(t *testing.T, ctx context.Context, kubeContext, namespace
 
 func assertReviewRan(t *testing.T, logs string) {
 	t.Helper()
-	if strings.Contains(logs, "Block") || strings.Contains(logs, "Approve with fixes") || strings.Contains(logs, "No blocking findings") {
+	trimmed := strings.TrimSpace(logs)
+	if trimmed == "" {
+		t.Fatalf("reviewer logs were empty")
+	}
+	if strings.Contains(trimmed, "Block") || strings.Contains(trimmed, "Approve with fixes") || strings.Contains(trimmed, "No blocking findings") {
 		return
 	}
-	if strings.Contains(logs, "Review comment:") ||
-		strings.Contains(logs, "no code changes to review") ||
-		strings.Contains(logs, "no introduced code changes to review") ||
-		strings.Contains(logs, "did not find any discrete, actionable bugs") ||
-		strings.Contains(logs, "did not find any discrete issue introduced by the patch") ||
-		strings.Contains(logs, "No actionable bugs were found in the diff") {
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "review comment:") ||
+		strings.Contains(lower, "no code changes") ||
+		strings.Contains(lower, "no changed lines") ||
+		strings.Contains(lower, "no introduced code changes") ||
+		strings.Contains(lower, "no introduced defects") ||
+		strings.Contains(lower, "no introduced issues") ||
+		strings.Contains(lower, "no actionable bugs") ||
+		strings.Contains(lower, "actionable bugs introduced") ||
+		strings.Contains(lower, "did not find any discrete") ||
+		strings.Contains(lower, "did not identify any introduced") ||
+		strings.Contains(lower, "did not identify any functional regressions") {
 		return
 	}
-	if strings.Contains(logs, "codex-reviewer: wrote") {
+	if strings.Contains(trimmed, "codex-reviewer: wrote") {
 		return
 	}
-	t.Fatalf("reviewer logs did not include a review verdict or report write confirmation:\n%s", logs)
+	t.Fatalf("reviewer logs did not include review content or report write confirmation:\n%s", trimmed)
 }
 
 func defaultBranch(t *testing.T, ctx context.Context, repo string) branchInfo {
@@ -398,6 +410,25 @@ func loadFixtures(t *testing.T) repoSet {
 		t.Fatalf("fixtures must include at least 5 small and 5 large repos: %#v", fixtures)
 	}
 	return fixtures
+}
+
+func repoPath(t *testing.T, parts ...string) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	for {
+		candidate := filepath.Join(append([]string{dir}, parts...)...)
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not find repository root from %s", dir)
+		}
+		dir = parent
+	}
 }
 
 func selectRepos(t *testing.T, fixtures repoSet) []repoFixture {

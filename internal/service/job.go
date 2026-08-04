@@ -135,6 +135,20 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 				},
 				"spec": map[string]any{
 					"restartPolicy": "Never",
+					"initContainers": []any{
+						map[string]any{
+							"name":          "openai-egress",
+							"image":         opts.SidecarImage,
+							"restartPolicy": "Always",
+							"env":           sidecarEnv,
+							"ports": []any{
+								map[string]any{"name": "proxy", "containerPort": 8888},
+							},
+							"readinessProbe": map[string]any{
+								"tcpSocket": map[string]any{"port": "proxy"},
+							},
+						},
+					},
 					"containers": []any{
 						map[string]any{
 							"name":  "reviewer",
@@ -146,17 +160,6 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 								map[string]string{"name": "out", "mountPath": "/out"},
 							},
 							"workingDir": "/workspace",
-						},
-						map[string]any{
-							"name":  "openai-egress",
-							"image": opts.SidecarImage,
-							"env":   sidecarEnv,
-							"ports": []any{
-								map[string]any{"name": "proxy", "containerPort": 8888},
-							},
-							"readinessProbe": map[string]any{
-								"tcpSocket": map[string]any{"port": "proxy"},
-							},
 						},
 					},
 					"volumes": []any{

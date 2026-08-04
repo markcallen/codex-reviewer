@@ -34,6 +34,10 @@ type CommandRunner interface {
 	Run(ctx context.Context, dir, name string, args ...string) error
 }
 
+type InputCommandRunner interface {
+	RunWithInput(ctx context.Context, dir, input, name string, args ...string) error
+}
+
 type execCommandRunner struct {
 	stdout io.Writer
 	stderr io.Writer
@@ -261,9 +265,12 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
-		reviewPrompt(req),
 	}
-	if err := opts.Runner.Run(ctx, opts.Workspace, "codex", args...); err != nil {
+	inputRunner, ok := opts.Runner.(InputCommandRunner)
+	if !ok {
+		return fmt.Errorf("runner does not support stdin for codex review")
+	}
+	if err := inputRunner.RunWithInput(ctx, opts.Workspace, reviewPrompt(req), "codex", args...); err != nil {
 		return fmt.Errorf("run codex review: %w", err)
 	}
 	return nil
@@ -412,8 +419,15 @@ func writeMetadata(path string, metadata ReviewMetadata) error {
 }
 
 func (r execCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
+	return r.RunWithInput(ctx, dir, "", name, args...)
+}
+
+func (r execCommandRunner) RunWithInput(ctx context.Context, dir, input, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	// Child stdout must not be forwarded to r.stdout (the service report channel).
 	// Codex emits JSON event/usage lines to stdout when --json is used; forwarding
 	// them would pollute the Markdown report returned to callers. The final report
@@ -430,9 +444,23 @@ type debugCommandRunner struct {
 }
 
 func (r debugCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
+	return r.RunWithInput(ctx, dir, "", name, args...)
+}
+
+func (r debugCommandRunner) RunWithInput(ctx context.Context, dir, input, name string, args ...string) error {
 	startedAt := r.now().UTC()
 	writeDebugLog(r.debug, "command start at=%s dir=%s argv=%s\n", startedAt.Format(time.RFC3339), dir, commandString(name, args))
-	err := r.runner.Run(ctx, dir, name, args...)
+	var err error
+	if input != "" {
+		inputRunner, ok := r.runner.(InputCommandRunner)
+		if !ok {
+			err = fmt.Errorf("runner does not support stdin")
+		} else {
+			err = inputRunner.RunWithInput(ctx, dir, input, name, args...)
+		}
+	} else {
+		err = r.runner.Run(ctx, dir, name, args...)
+	}
 	finishedAt := r.now().UTC()
 	if err != nil {
 		writeDebugLog(r.debug, "command failed at=%s duration=%s error=%s\n", finishedAt.Format(time.RFC3339), finishedAt.Sub(startedAt), err.Error())
