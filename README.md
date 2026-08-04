@@ -24,6 +24,18 @@ It avoids style-only comments unless style hides a real bug.
 
 ## Quick start
 
+For local development on this repository:
+
+```bash
+cp .env.example .env
+make deps
+make build
+make test
+```
+
+Fill `.env` only when you need credential-backed Docker or Kubernetes review
+flows. Real `.env` files are ignored and must stay out of commits.
+
 Build the CLI and install the reviewer for your user account:
 
 ```bash
@@ -461,6 +473,19 @@ That makes Codex's built-in `/review` command use the same high-capability model
 ## Customize severity rules
 
 Edit `docs/code_review.md` and `AGENTS.md` for your team's standards. Keep the reviewer strict about P0/P1 issues and forgiving about nits. That balance keeps reviews useful instead of noisy.
+
+## Public repository safety
+
+This repository includes a sample [.env.example](.env.example) for local
+credential names and keeps real `.env` files ignored. Before publishing, tagging,
+or accepting external contributions, run:
+
+```bash
+make secrets-scan
+```
+
+See [docs/security.md](docs/security.md) for the full local secret-handling and
+incident checklist.
 
 ## License
 

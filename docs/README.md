@@ -6,6 +6,7 @@
 - [Phase 1 Kubernetes review service plan](phase1-k8s-review-service-plan.md)
 - [Repository identity](repository-identity.md)
 - [Review config and mode selection](review-config.md)
+- [Security and secret handling](security.md)
 - [Usage estimates and telemetry](usage-telemetry.md)
 - [Sources](sources.md)
 

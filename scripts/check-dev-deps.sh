@@ -4,6 +4,7 @@ set -eu
 GO_MIN_VERSION="${GO_MIN_VERSION:-1.25}"
 KIND_VERSION="${KIND_VERSION:-v0.30.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-stable}"
+GITLEAKS_VERSION="${GITLEAKS_VERSION:-v8.30.1}"
 KIND_MIN_VERSION="${KIND_VERSION#v}"
 
 failed=0
@@ -125,10 +126,27 @@ check_gh() {
   print_check gh "$found" installed OK
 }
 
+check_gitleaks() {
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    missing gitleaks "$GITLEAKS_VERSION"
+    return
+  fi
+  found="$(gitleaks version 2>/dev/null | head -1)"
+  found_num="${found#v}"
+  required_num="${GITLEAKS_VERSION#v}"
+  if version_ge "$found_num" "$required_num"; then
+    print_check gitleaks "$found" "${GITLEAKS_VERSION}+" OK
+  else
+    print_check gitleaks "$found" "${GITLEAKS_VERSION}+" FAIL
+    failed=1
+  fi
+}
+
 check_go
 check_gofmt
 check_golangci_lint
 check_actionlint
+check_gitleaks
 check_docker
 check_kind
 check_kubectl

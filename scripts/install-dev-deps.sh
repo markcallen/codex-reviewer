@@ -7,6 +7,7 @@ KIND_VERSION="${KIND_VERSION:-v0.30.0}"
 KUBECTL_VERSION="${KUBECTL_VERSION:-stable}"
 GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-v2.12.2}"
 ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-v1.7.12}"
+GITLEAKS_VERSION="${GITLEAKS_VERSION:-v8.30.1}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 BIN_DIR="${ROOT_DIR}/bin"
 TOOLS_DIR="${ROOT_DIR}/.tools"
@@ -120,6 +121,14 @@ install_actionlint() {
   GOBIN="$BIN_DIR" go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
 }
 
+install_gitleaks() {
+  if have gitleaks; then
+    echo "gitleaks already installed"
+    return
+  fi
+  GOBIN="$BIN_DIR" go install "github.com/gitleaks/gitleaks/v8@${GITLEAKS_VERSION}"
+}
+
 install_with_package_manager() {
   tool="$1"
   brew_pkg="$2"
@@ -144,6 +153,7 @@ install_with_package_manager() {
 install_go
 install_golangci_lint
 install_actionlint
+install_gitleaks
 install_kind
 install_kubectl
 install_with_package_manager docker docker docker.io

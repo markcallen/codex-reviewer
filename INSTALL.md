@@ -49,10 +49,15 @@ Choose ChatGPT sign-in for subscription access, or API-key sign-in for usage-bas
 From this repository:
 
 ```bash
+cp .env.example .env
+make deps
 make build
 ```
 
 The resulting binary contains the reviewer agent, Codex config, review checklist, prompts, and repository guidance.
+
+Only fill `.env` when you need credential-backed Docker or Kubernetes review
+flows. Real `.env` files are ignored and must not be committed.
 
 `make build` injects the version from `git describe --tags --always --dirty`. To build a release with an explicit tag:
 
@@ -166,12 +171,12 @@ make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
 Run a review from the repository being reviewed:
 
 ```bash
-export OPENAI_API_KEY=...
+export CODEX_API_KEY=...
 export GITHUB_TOKEN=...
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e OPENAI_API_KEY \
+  -e CODEX_API_KEY \
   -e GITHUB_TOKEN \
   -v "$PWD:/workspace" \
   -w /workspace \
