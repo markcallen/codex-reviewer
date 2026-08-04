@@ -42,13 +42,14 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions secrets-scan secrets-protect-staged deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build frontend-build test coverage-check coverage-func coverage-html test-e2e lint lint-actions secrets-scan secrets-protect-staged deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
 		'  make setup              Install deps, verify tools, build, and test' \
 		'  make build              Build bin/codex-reviewer' \
+		'  make frontend-build     Build the embedded service info page' \
 		'  make test               Run unit tests with coverage' \
 		'  make coverage-check     Fail if total coverage is below threshold' \
 		'  make coverage-func      Print function-level coverage' \
@@ -111,6 +112,9 @@ setup: deps check-deps build lint test test-e2e
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(PKG)
+
+frontend-build:
+	npm --prefix web run build
 
 test:
 	@mkdir -p "$(COVERAGE_DIR)"

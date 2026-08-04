@@ -86,6 +86,7 @@ func (s *APIServer) Handler() http.Handler {
 	mux.HandleFunc("POST /reviews", s.handleCreateReview)
 	mux.HandleFunc("GET /reviews/{id}", s.handleGetReview)
 	mux.HandleFunc("GET /reviews/{id}/report", s.handleGetReport)
+	mux.HandleFunc("GET /", s.handleInfoPage)
 	return mux
 }
 

@@ -170,6 +170,31 @@ func TestAPIServerHealthAndReadiness(t *testing.T) {
 	}
 }
 
+func TestAPIServerServesInfoPageAtRoot(t *testing.T) {
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Codex Reviewer") {
+		t.Fatalf("root page does not include title: %s", rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", contentType)
+	}
+}
+
 func TestAPIServerGetsSubmittedReview(t *testing.T) {
 	server, err := NewAPIServer(APIOptions{
 		JobOptions: JobOptions{
