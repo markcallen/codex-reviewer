@@ -12,6 +12,11 @@ Thumbs.db
 bin/
 coverage/
 codex-review/
+!codex-review/
+codex-review/*
+!codex-review/k8s-review.md
+!codex-review/k8s-reviews/
+!codex-review/k8s-reviews/**
 .cache/
 
 # Local env files

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
-	"strings"
 	"sync"
 )
 
@@ -18,6 +15,7 @@ type APIOptions struct {
 	JobOptions JobOptions
 	Applier    JobApplier
 	Reports    ReportReader
+	Status     JobStatusReader
 	Telemetry  TelemetryRecorder
 }
 
@@ -29,13 +27,18 @@ type ReportReader interface {
 	ReadReport(ctx context.Context, namespace, jobName string) ([]byte, error)
 }
 
+type JobStatusReader interface {
+	ReadJobStatus(ctx context.Context, namespace, jobName string) (JobRuntimeStatus, error)
+}
+
+type JobRuntimeStatus struct {
+	Status string
+	Error  string
+}
+
 type TelemetryRecorder interface {
 	Ingest(event ReviewTelemetryEvent) (ReviewTelemetryEvent, error)
 }
-
-type KubectlApplier struct{}
-
-type KubectlReportReader struct{}
 
 type ReviewResponse struct {
 	ID        string `json:"id"`
@@ -54,11 +57,15 @@ type APIServer struct {
 }
 
 func NewAPIServer(opts APIOptions) (*APIServer, error) {
+	kubeClient := KubernetesClient{}
 	if opts.Applier == nil {
-		opts.Applier = KubectlApplier{}
+		opts.Applier = kubeClient
 	}
 	if opts.Reports == nil {
-		opts.Reports = KubectlReportReader{}
+		opts.Reports = kubeClient
+	}
+	if opts.Status == nil {
+		opts.Status = kubeClient
 	}
 	if opts.JobOptions.ReviewerImage == "" {
 		return nil, fmt.Errorf("reviewer image is required")
@@ -66,8 +73,8 @@ func NewAPIServer(opts APIOptions) (*APIServer, error) {
 	if opts.JobOptions.SidecarImage == "" {
 		return nil, fmt.Errorf("sidecar image is required")
 	}
-	if opts.JobOptions.OpenAISecretName == "" {
-		return nil, fmt.Errorf("OpenAI secret name is required")
+	if opts.JobOptions.OpenAISecretName == "" && opts.JobOptions.CodexAuthSecretName == "" {
+		return nil, fmt.Errorf("OpenAI secret name or Codex auth secret name is required")
 	}
 	return &APIServer{opts: opts, reviews: make(map[string]ReviewResponse)}, nil
 }
@@ -155,22 +162,37 @@ func (s *APIServer) handleGetReview(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	resp, ok := s.review(id)
 	if !ok {
-		writeJSON(w, http.StatusNotFound, ReviewResponse{ID: id, Status: "missing"})
+		resp = ReviewResponse{
+			ID:        id,
+			Status:    "missing",
+			JobName:   JobName(id),
+			ReportURL: "/reviews/" + id + "/report",
+		}
+	}
+	refreshed, err := s.refreshReviewStatus(r.Context(), resp)
+	if err != nil {
+		if !ok {
+			writeJSON(w, http.StatusNotFound, resp)
+			return
+		}
+		resp.Error = err.Error()
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, refreshed)
 }
 
 func (s *APIServer) handleGetReport(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if _, ok := s.review(id); !ok {
-		http.NotFound(w, r)
-		return
-	}
 	report, err := s.opts.Reports.ReadReport(r.Context(), s.opts.JobOptions.Namespace, JobName(id))
 	if err != nil {
 		http.Error(w, "review report is not available yet: "+err.Error(), http.StatusAccepted)
 		return
+	}
+	if resp, ok := s.review(id); ok {
+		resp.Status = "succeeded"
+		resp.Verdict = verdictFromReport(report)
+		s.storeReview(resp)
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	_, _ = w.Write(report)
@@ -183,38 +205,29 @@ func (s *APIServer) review(id string) (ReviewResponse, bool) {
 	return resp, ok
 }
 
-func (KubectlApplier) Apply(ctx context.Context, manifest []byte) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
-	cmd.Stdin = bytes.NewReader(manifest)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return fmt.Errorf("%w: %s", err, detail)
-		}
-		return err
-	}
-	return nil
+func (s *APIServer) storeReview(resp ReviewResponse) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviews[resp.ID] = resp
 }
 
-func (KubectlReportReader) ReadReport(ctx context.Context, namespace, jobName string) ([]byte, error) {
-	args := []string{"logs", "job/" + jobName, "-c", "reviewer"}
-	if namespace != "" {
-		args = append([]string{"-n", namespace}, args...)
+func (s *APIServer) refreshReviewStatus(ctx context.Context, resp ReviewResponse) (ReviewResponse, error) {
+	if resp.JobName == "" {
+		resp.JobName = JobName(resp.ID)
 	}
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	if resp.ReportURL == "" {
+		resp.ReportURL = "/reviews/" + resp.ID + "/report"
+	}
+	runtime, err := s.opts.Status.ReadJobStatus(ctx, s.opts.JobOptions.Namespace, resp.JobName)
 	if err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return nil, fmt.Errorf("%w: %s", err, detail)
-		}
-		return nil, err
+		return resp, err
 	}
-	return out, nil
+	resp.Status = runtime.Status
+	resp.Error = runtime.Error
+	if resp.ID != "" {
+		s.storeReview(resp)
+	}
+	return resp, nil
 }
 
 func newReviewID() string {

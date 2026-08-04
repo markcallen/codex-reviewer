@@ -34,6 +34,10 @@ type CommandRunner interface {
 	Run(ctx context.Context, dir, name string, args ...string) error
 }
 
+type InputCommandRunner interface {
+	RunWithInput(ctx context.Context, dir, input, name string, args ...string) error
+}
+
 type execCommandRunner struct {
 	stdout io.Writer
 	stderr io.Writer
@@ -111,6 +115,9 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
+	if err := installCodexAuthFromEnv(); err != nil {
+		return err
+	}
 	debugLogPath := filepath.Join(opts.OutputDir, "debug.log")
 	debugLog, err := os.OpenFile(debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -129,7 +136,7 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o600); err != nil {
 		return fmt.Errorf("write request.json: %w", err)
 	}
-	if err := waitForLocalProxy(ctx, 30*time.Second); err != nil {
+	if err := waitForLocalProxy(ctx, 5*time.Minute); err != nil {
 		return err
 	}
 
@@ -194,6 +201,36 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	return nil
 }
 
+func installCodexAuthFromEnv() error {
+	auth := strings.TrimSpace(os.Getenv("CODEX_AUTH"))
+	if auth == "" {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(auth), &decoded); err != nil {
+		return fmt.Errorf("decode CODEX_AUTH JSON: %w", err)
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("discover home directory for CODEX_AUTH: %w", err)
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		return fmt.Errorf("create CODEX_HOME: %w", err)
+	}
+	authPath := filepath.Join(codexHome, "auth.json")
+	if err := os.WriteFile(authPath, []byte(auth+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write Codex auth file: %w", err)
+	}
+	_ = os.Unsetenv("CODEX_AUTH")
+	_ = os.Unsetenv("CODEX_API_KEY")
+	_ = os.Unsetenv("OPENAI_API_KEY")
+	return nil
+}
+
 func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewRequest, reportPath string) error {
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		rewrite := "url.https://x-access-token:" + token + "@github.com/.insteadOf"
@@ -228,9 +265,12 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
 		"--output-last-message", reportPath,
-		reviewPrompt(req),
 	}
-	if err := opts.Runner.Run(ctx, opts.Workspace, "codex", args...); err != nil {
+	inputRunner, ok := opts.Runner.(InputCommandRunner)
+	if !ok {
+		return fmt.Errorf("runner does not support stdin for codex review")
+	}
+	if err := inputRunner.RunWithInput(ctx, opts.Workspace, reviewPrompt(req), "codex", args...); err != nil {
 		return fmt.Errorf("run codex review: %w", err)
 	}
 	return nil
@@ -347,6 +387,10 @@ func ParseVerdictFile(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read review report: %w", err)
 	}
+	return ParseVerdict(data), nil
+}
+
+func ParseVerdict(data []byte) string {
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
 		if line == "" {
@@ -354,16 +398,16 @@ func ParseVerdictFile(path string) (string, error) {
 		}
 		switch {
 		case strings.HasPrefix(line, "Block"):
-			return "block", nil
+			return "block"
 		case strings.HasPrefix(line, "Approve with fixes"):
-			return "approve_with_fixes", nil
+			return "approve_with_fixes"
 		case strings.HasPrefix(line, "No blocking findings"):
-			return "no_blocking_findings", nil
+			return "no_blocking_findings"
 		default:
-			return "unknown", nil
+			return "unknown"
 		}
 	}
-	return "unknown", nil
+	return "unknown"
 }
 
 func writeMetadata(path string, metadata ReviewMetadata) error {
@@ -375,8 +419,15 @@ func writeMetadata(path string, metadata ReviewMetadata) error {
 }
 
 func (r execCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
+	return r.RunWithInput(ctx, dir, "", name, args...)
+}
+
+func (r execCommandRunner) RunWithInput(ctx context.Context, dir, input, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	// Child stdout must not be forwarded to r.stdout (the service report channel).
 	// Codex emits JSON event/usage lines to stdout when --json is used; forwarding
 	// them would pollute the Markdown report returned to callers. The final report
@@ -393,9 +444,23 @@ type debugCommandRunner struct {
 }
 
 func (r debugCommandRunner) Run(ctx context.Context, dir, name string, args ...string) error {
+	return r.RunWithInput(ctx, dir, "", name, args...)
+}
+
+func (r debugCommandRunner) RunWithInput(ctx context.Context, dir, input, name string, args ...string) error {
 	startedAt := r.now().UTC()
 	writeDebugLog(r.debug, "command start at=%s dir=%s argv=%s\n", startedAt.Format(time.RFC3339), dir, commandString(name, args))
-	err := r.runner.Run(ctx, dir, name, args...)
+	var err error
+	if input != "" {
+		inputRunner, ok := r.runner.(InputCommandRunner)
+		if !ok {
+			err = fmt.Errorf("runner does not support stdin")
+		} else {
+			err = inputRunner.RunWithInput(ctx, dir, input, name, args...)
+		}
+	} else {
+		err = r.runner.Run(ctx, dir, name, args...)
+	}
 	finishedAt := r.now().UTC()
 	if err != nil {
 		writeDebugLog(r.debug, "command failed at=%s duration=%s error=%s\n", finishedAt.Format(time.RFC3339), finishedAt.Sub(startedAt), err.Error())

@@ -6,9 +6,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,11 +41,13 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 	}
 	requireTool(t, "kind")
 	requireTool(t, "kubectl")
+	requireTool(t, "helm")
 	requireTool(t, "gh")
 
 	reviewerImage := requireEnv(t, "CODEX_REVIEWER_REVIEWER_IMAGE")
 	sidecarImage := requireEnv(t, "CODEX_REVIEWER_SIDECAR_IMAGE")
-	openAISecret := requireEnv(t, "CODEX_REVIEWER_OPENAI_SECRET")
+	openAISecret := envDefault("CODEX_REVIEWER_OPENAI_SECRET", "")
+	codexAuthSecret := envDefault("CODEX_REVIEWER_CODEX_AUTH_SECRET", "")
 	githubSecret := requireEnv(t, "CODEX_REVIEWER_GITHUB_SECRET")
 	namespace := envDefault("CODEX_REVIEWER_NAMESPACE", "codex-reviewer-e2e")
 	cluster := envDefault("CODEX_REVIEWER_KIND_CLUSTER", "codex-reviewer-e2e")
@@ -54,11 +58,79 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 
 	ensureKindCluster(t, ctx, cluster)
 	ensureNamespace(t, ctx, kubeContext, namespace)
-	ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+	if os.Getenv("CODEX_AUTH") != "" {
+		if codexAuthSecret == "" {
+			codexAuthSecret = "codex-auth"
+		}
+		ensureSecretFromEnv(t, ctx, kubeContext, namespace, codexAuthSecret, "auth.json", "CODEX_AUTH")
+		openAISecret = ""
+	} else {
+		if openAISecret == "" {
+			openAISecret = requireEnv(t, "CODEX_REVIEWER_OPENAI_SECRET")
+		}
+		ensureSecretFromEnv(t, ctx, kubeContext, namespace, openAISecret, "api-key", "OPENAI_API_KEY")
+		codexAuthSecret = ""
+	}
 	ensureSecretFromEnv(t, ctx, kubeContext, namespace, githubSecret, "token", "GITHUB_TOKEN")
 
 	fixtures := loadFixtures(t)
 	cases := selectRepos(t, fixtures)
+	if len(cases) > 0 {
+		t.Run("api-"+sanitizeName(cases[0].Name), func(t *testing.T) {
+			branch := defaultBranch(t, ctx, cases[0].Name)
+			req := service.ReviewRequest{
+				RepoURL:      cases[0].URL,
+				BaseRef:      branch.BaseRef,
+				HeadRef:      branch.Name,
+				HeadSHA:      branch.HeadSHA,
+				ProfileName:  "standard",
+				Profile:      mustProfile(t, "standard"),
+				ReturnFormat: "markdown",
+			}
+			release := envDefault("CODEX_REVIEWER_HELM_RELEASE", "codex-reviewer")
+			deployReviewAPI(t, ctx, kubeContext, namespace, release, reviewerImage, sidecarImage, openAISecret, codexAuthSecret, githubSecret)
+			apiURL, stopForward := startPortForward(t, ctx, kubeContext, namespace, release)
+			t.Cleanup(stopForward)
+
+			resp, err := service.Client{BaseURL: apiURL}.Submit(ctx, req)
+			if err != nil {
+				t.Fatalf("Submit() error = %v", err)
+			}
+			t.Logf("submitted api review id=%s job=%s", resp.ID, resp.JobName)
+			t.Cleanup(func() {
+				deleteJobIfExists(t, context.Background(), kubeContext, namespace, resp.JobName)
+			})
+			report, err := service.Client{BaseURL: apiURL}.WaitReport(ctx, resp.ReportURL, 5*time.Second)
+			if err != nil {
+				t.Fatalf("WaitReport() error = %v", err)
+			}
+			assertReviewRan(t, string(report))
+			status, err := service.Client{BaseURL: apiURL}.Status(ctx, resp.ID)
+			if err != nil {
+				t.Fatalf("Status() error = %v", err)
+			}
+			if status.Status != "succeeded" {
+				t.Fatalf("status before restart = %#v, want succeeded", status)
+			}
+
+			stopForward()
+			restartDeployment(t, ctx, kubeContext, namespace, release)
+			apiURL, stopForward = startPortForward(t, ctx, kubeContext, namespace, release)
+			t.Cleanup(stopForward)
+			status, err = service.Client{BaseURL: apiURL}.Status(ctx, resp.ID)
+			if err != nil {
+				t.Fatalf("Status() after restart error = %v", err)
+			}
+			if status.Status != "succeeded" || status.JobName != resp.JobName {
+				t.Fatalf("status after restart = %#v, want succeeded job %s", status, resp.JobName)
+			}
+			report, err = service.Client{BaseURL: apiURL}.Report(ctx, resp.ReportURL)
+			if err != nil {
+				t.Fatalf("Report() after restart error = %v", err)
+			}
+			assertReviewRan(t, string(report))
+		})
+	}
 	for _, repo := range cases {
 		t.Run(repo.Name, func(t *testing.T) {
 			branch := defaultBranch(t, ctx, repo.Name)
@@ -73,13 +145,14 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 				ReturnFormat: "markdown",
 			}
 			manifest, err := service.JobManifest(req, service.JobOptions{
-				ReviewID:         "e2e-" + sanitizeName(repo.Name),
-				Namespace:        namespace,
-				ReviewerImage:    reviewerImage,
-				SidecarImage:     sidecarImage,
-				OpenAISecretName: openAISecret,
-				GitHubSecretName: githubSecret,
-				ServiceAccount:   envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", ""),
+				ReviewID:            "e2e-" + sanitizeName(repo.Name),
+				Namespace:           namespace,
+				ReviewerImage:       reviewerImage,
+				SidecarImage:        sidecarImage,
+				OpenAISecretName:    openAISecret,
+				CodexAuthSecretName: codexAuthSecret,
+				GitHubSecretName:    githubSecret,
+				ServiceAccount:      envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", ""),
 			})
 			if err != nil {
 				t.Fatalf("JobManifest() error = %v", err)
@@ -97,6 +170,98 @@ func TestKindReviewsSmallAndLargePrivateRepos(t *testing.T) {
 			assertReviewRan(t, string(logs))
 		})
 	}
+}
+
+func deployReviewAPI(t *testing.T, ctx context.Context, kubeContext, namespace, release, reviewerImage, sidecarImage, openAISecret, codexAuthSecret, githubSecret string) {
+	t.Helper()
+	authMode := "openai"
+	if codexAuthSecret != "" {
+		authMode = "codex"
+	}
+	chart := envDefault("CODEX_REVIEWER_HELM_CHART", repoPath(t, "deploy/helm/codex-reviewer"))
+	serviceAccount := envDefault("CODEX_REVIEWER_SERVICE_ACCOUNT", "codex-reviewer")
+	args := []string{
+		"upgrade", "--install", release, chart,
+		"--kube-context", kubeContext,
+		"--namespace", namespace,
+		"--create-namespace",
+		"--set-string", "fullnameOverride=" + release,
+		"--set-string", "image.fullOverride=" + reviewerImage,
+		"--set-string", "reviewerJob.image.fullOverride=" + reviewerImage,
+		"--set-string", "reviewerJob.sidecarImage.fullOverride=" + sidecarImage,
+		"--set-string", "podLabels.e2eRun=" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		"--set", "serviceAccount.create=false",
+		"--set-string", "serviceAccount.name=" + serviceAccount,
+		"--set-string", "auth.mode=" + authMode,
+		"--set-string", "auth.openaiSecret.name=" + openAISecret,
+		"--set-string", "auth.openaiSecret.key=api-key",
+		"--set-string", "auth.codexAuthSecret.name=" + codexAuthSecret,
+		"--set-string", "auth.codexAuthSecret.key=auth.json",
+		"--set-string", "github.secret.name=" + githubSecret,
+		"--set-string", "github.secret.key=token",
+		"--wait",
+	}
+	run(t, ctx, "", "helm", args...)
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "status", "deployment/"+release, "--timeout=2m")
+}
+
+func startPortForward(t *testing.T, ctx context.Context, kubeContext, namespace, serviceName string) (string, func()) {
+	t.Helper()
+	port := freeLocalPort(t)
+	cmd := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "port-forward", "svc/"+serviceName, strconv.Itoa(port)+":8080")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("kubectl port-forward failed: %v", err)
+	}
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = cmd.Wait()
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", address, 500*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return "http://" + address, stop
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	stop()
+	t.Fatalf("kubectl port-forward did not become ready: %s", strings.TrimSpace(stderr.String()))
+	return "", nil
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on free local port: %v", err)
+	}
+	defer listener.Close() //nolint:errcheck
+	_, rawPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("SplitHostPort(%s) error = %v", listener.Addr(), err)
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatalf("Atoi(%s) error = %v", rawPort, err)
+	}
+	return port
+}
+
+func restartDeployment(t *testing.T, ctx context.Context, kubeContext, namespace, deployment string) {
+	t.Helper()
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "restart", "deployment/"+deployment)
+	run(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "rollout", "status", "deployment/"+deployment, "--timeout=2m")
 }
 
 func ensureKindCluster(t *testing.T, ctx context.Context, cluster string) {
@@ -163,13 +328,16 @@ func waitForReviewerContainer(t *testing.T, ctx context.Context, kubeContext, na
 		case "0":
 			return
 		default:
-			logs := output(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
-			t.Fatalf("reviewer container exited with %s\n%s", exitCode, logs)
+			describe, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
+			reviewerLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+			sidecarLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "openai-egress").CombinedOutput()
+			t.Fatalf("reviewer container exited with %s\n%s\nreviewer logs:\n%s\nsidecar logs:\n%s", exitCode, describe, reviewerLogs, sidecarLogs)
 		}
 	}
 	describe, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
-	logs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
-	t.Fatalf("reviewer container did not finish within %s\n%s\n%s", timeout, describe, logs)
+	reviewerLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+	sidecarLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "openai-egress").CombinedOutput()
+	t.Fatalf("reviewer container did not finish within %s\n%s\nreviewer logs:\n%s\nsidecar logs:\n%s", timeout, describe, reviewerLogs, sidecarLogs)
 }
 
 func deleteJobIfExists(t *testing.T, ctx context.Context, kubeContext, namespace, jobName string) {
@@ -179,21 +347,31 @@ func deleteJobIfExists(t *testing.T, ctx context.Context, kubeContext, namespace
 
 func assertReviewRan(t *testing.T, logs string) {
 	t.Helper()
-	if strings.Contains(logs, "Block") || strings.Contains(logs, "Approve with fixes") || strings.Contains(logs, "No blocking findings") {
+	trimmed := strings.TrimSpace(logs)
+	if trimmed == "" {
+		t.Fatalf("reviewer logs were empty")
+	}
+	if strings.Contains(trimmed, "Block") || strings.Contains(trimmed, "Approve with fixes") || strings.Contains(trimmed, "No blocking findings") {
 		return
 	}
-	if strings.Contains(logs, "Review comment:") ||
-		strings.Contains(logs, "no code changes to review") ||
-		strings.Contains(logs, "no introduced code changes to review") ||
-		strings.Contains(logs, "did not find any discrete, actionable bugs") ||
-		strings.Contains(logs, "did not find any discrete issue introduced by the patch") ||
-		strings.Contains(logs, "No actionable bugs were found in the diff") {
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "review comment:") ||
+		strings.Contains(lower, "no code changes") ||
+		strings.Contains(lower, "no changed lines") ||
+		strings.Contains(lower, "no introduced code changes") ||
+		strings.Contains(lower, "no introduced defects") ||
+		strings.Contains(lower, "no introduced issues") ||
+		strings.Contains(lower, "no actionable bugs") ||
+		strings.Contains(lower, "actionable bugs introduced") ||
+		strings.Contains(lower, "did not find any discrete") ||
+		strings.Contains(lower, "did not identify any introduced") ||
+		strings.Contains(lower, "did not identify any functional regressions") {
 		return
 	}
-	if strings.Contains(logs, "codex-reviewer: wrote") {
+	if strings.Contains(trimmed, "codex-reviewer: wrote") {
 		return
 	}
-	t.Fatalf("reviewer logs did not include a review verdict or report write confirmation:\n%s", logs)
+	t.Fatalf("reviewer logs did not include review content or report write confirmation:\n%s", trimmed)
 }
 
 func defaultBranch(t *testing.T, ctx context.Context, repo string) branchInfo {
@@ -232,6 +410,25 @@ func loadFixtures(t *testing.T) repoSet {
 		t.Fatalf("fixtures must include at least 5 small and 5 large repos: %#v", fixtures)
 	}
 	return fixtures
+}
+
+func repoPath(t *testing.T, parts ...string) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	for {
+		candidate := filepath.Join(append([]string{dir}, parts...)...)
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("could not find repository root from %s", dir)
+		}
+		dir = parent
+	}
 }
 
 func selectRepos(t *testing.T, fixtures repoSet) []repoFixture {

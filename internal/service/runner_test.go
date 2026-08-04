@@ -13,9 +13,10 @@ import (
 )
 
 type recordedCommand struct {
-	Dir  string
-	Name string
-	Args []string
+	Dir   string
+	Name  string
+	Args  []string
+	Input string
 }
 
 type fakeCommandRunner struct {
@@ -26,7 +27,15 @@ type fakeCommandRunner struct {
 }
 
 func (r *fakeCommandRunner) Run(_ context.Context, dir, name string, args ...string) error {
-	r.commands = append(r.commands, recordedCommand{Dir: dir, Name: name, Args: append([]string(nil), args...)})
+	return r.run(dir, "", name, args...)
+}
+
+func (r *fakeCommandRunner) RunWithInput(_ context.Context, dir, input, name string, args ...string) error {
+	return r.run(dir, input, name, args...)
+}
+
+func (r *fakeCommandRunner) run(dir, input, name string, args ...string) error {
+	r.commands = append(r.commands, recordedCommand{Dir: dir, Name: name, Args: append([]string(nil), args...), Input: input})
 	if name == r.failName {
 		if r.failErr != nil {
 			return r.failErr
@@ -88,10 +97,16 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 		t.Fatalf("last command = %s, want codex", last.Name)
 	}
 	args := strings.Join(last.Args, " ")
-	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message", "code_reviewer"} {
+	for _, want := range []string{"exec review", "--base origin/main", "--model gpt-5.5", "--output-last-message"} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("codex args missing %q: %v", want, last.Args)
 		}
+	}
+	if last.Args[len(last.Args)-1] == "-" {
+		t.Fatalf("codex args should not include positional prompt marker with --base: %v", last.Args)
+	}
+	if !strings.Contains(last.Input, "code_reviewer") {
+		t.Fatalf("codex stdin missing review prompt: %q", last.Input)
 	}
 
 	metadata := readMetadata(t, filepath.Join(out, "metadata.json"))
@@ -335,6 +350,66 @@ func TestRunReviewJobConfiguresGitHubTokenWhenPresent(t *testing.T) {
 	}
 }
 
+func TestRunReviewJobInstallsCodexAuthFromEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("CODEX_AUTH", `{"tokens":{"access_token":"device-token"}}`)
+	t.Setenv("CODEX_API_KEY", "ignored-api-key")
+	t.Setenv("OPENAI_API_KEY", "ignored-openai-key")
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	t.Setenv("CODEX_HOME", codexHome)
+	out := t.TempDir()
+	req := testRunnerRequest(t)
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   out,
+		Runner:      &fakeCommandRunner{},
+	})
+	if err != nil {
+		t.Fatalf("RunReviewJob() error = %v", err)
+	}
+	authFile := readFile(t, filepath.Join(codexHome, "auth.json"))
+	if !strings.Contains(authFile, "device-token") {
+		t.Fatalf("auth.json missing CODEX_AUTH content: %q", authFile)
+	}
+	if got := os.Getenv("CODEX_AUTH"); got != "" {
+		t.Fatalf("CODEX_AUTH = %q, want unset", got)
+	}
+	if got := os.Getenv("CODEX_API_KEY"); got != "" {
+		t.Fatalf("CODEX_API_KEY = %q, want unset", got)
+	}
+	if got := os.Getenv("OPENAI_API_KEY"); got != "" {
+		t.Fatalf("OPENAI_API_KEY = %q, want unset", got)
+	}
+}
+
+func TestRunReviewJobRejectsInvalidCodexAuthJSON(t *testing.T) {
+	t.Setenv("CODEX_AUTH", `{not-json`)
+	req := testRunnerRequest(t)
+	requestJSON, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+
+	err = RunReviewJob(context.Background(), RunnerOptions{
+		RequestJSON: string(requestJSON),
+		Workspace:   filepath.Join(t.TempDir(), "workspace"),
+		OutputDir:   t.TempDir(),
+		Runner:      &fakeCommandRunner{},
+	})
+	if err == nil {
+		t.Fatal("RunReviewJob() error = nil, want invalid CODEX_AUTH error")
+	}
+	if !strings.Contains(err.Error(), "decode CODEX_AUTH JSON") {
+		t.Fatalf("RunReviewJob() error = %v", err)
+	}
+}
+
 func TestRunReviewJobDoesNotFetchRawBaseSHA(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	out := t.TempDir()
@@ -371,6 +446,8 @@ func TestParseVerdictFile(t *testing.T) {
 		{name: "block", body: "# Block\n", want: "block"},
 		{name: "approve with fixes", body: "Approve with fixes\n", want: "approve_with_fixes"},
 		{name: "no blocking findings", body: "# No blocking findings\n", want: "no_blocking_findings"},
+		{name: "indented heading", body: "  # Block\n", want: "block"},
+		{name: "prefix with reason", body: "Block (missing auth test)\n", want: "block"},
 		{name: "unknown", body: "Looks fine\n", want: "unknown"},
 	}
 	for _, tt := range tests {
