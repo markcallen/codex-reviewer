@@ -52,6 +52,9 @@ func TestJobManifestIncludesReviewerAndSidecar(t *testing.T) {
 	if reviewer["name"] != "reviewer" || sidecar["name"] != "openai-egress" {
 		t.Fatalf("unexpected containers: %#v", containers)
 	}
+	if _, ok := sidecar["readinessProbe"].(map[string]any); !ok {
+		t.Fatalf("sidecar missing readiness probe: %#v", sidecar)
+	}
 	if !strings.Contains(string(data), "HTTPS_PROXY") {
 		t.Fatalf("manifest missing proxy env:\n%s", data)
 	}

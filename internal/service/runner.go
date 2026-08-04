@@ -132,7 +132,7 @@ func RunReviewJob(ctx context.Context, opts RunnerOptions) error {
 	if err := os.WriteFile(filepath.Join(opts.OutputDir, "request.json"), []byte(opts.RequestJSON), 0o600); err != nil {
 		return fmt.Errorf("write request.json: %w", err)
 	}
-	if err := waitForLocalProxy(ctx, 30*time.Second); err != nil {
+	if err := waitForLocalProxy(ctx, 5*time.Minute); err != nil {
 		return err
 	}
 

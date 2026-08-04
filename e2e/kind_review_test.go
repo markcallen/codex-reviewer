@@ -326,13 +326,16 @@ func waitForReviewerContainer(t *testing.T, ctx context.Context, kubeContext, na
 		case "0":
 			return
 		default:
-			logs := output(t, ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer")
-			t.Fatalf("reviewer container exited with %s\n%s", exitCode, logs)
+			describe, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
+			reviewerLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+			sidecarLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "openai-egress").CombinedOutput()
+			t.Fatalf("reviewer container exited with %s\n%s\nreviewer logs:\n%s\nsidecar logs:\n%s", exitCode, describe, reviewerLogs, sidecarLogs)
 		}
 	}
 	describe, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "describe", "job/"+jobName).CombinedOutput()
-	logs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
-	t.Fatalf("reviewer container did not finish within %s\n%s\n%s", timeout, describe, logs)
+	reviewerLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "reviewer").CombinedOutput()
+	sidecarLogs, _ := command(ctx, "", "kubectl", "--context", kubeContext, "-n", namespace, "logs", "job/"+jobName, "-c", "openai-egress").CombinedOutput()
+	t.Fatalf("reviewer container did not finish within %s\n%s\nreviewer logs:\n%s\nsidecar logs:\n%s", timeout, describe, reviewerLogs, sidecarLogs)
 }
 
 func deleteJobIfExists(t *testing.T, ctx context.Context, kubeContext, namespace, jobName string) {

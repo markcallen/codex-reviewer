@@ -154,6 +154,9 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 							"ports": []any{
 								map[string]any{"name": "proxy", "containerPort": 8888},
 							},
+							"readinessProbe": map[string]any{
+								"tcpSocket": map[string]any{"port": "proxy"},
+							},
 						},
 					},
 					"volumes": []any{
