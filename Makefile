@@ -8,6 +8,7 @@ GO_INSTALL_VERSION ?= 1.25.0
 KIND_VERSION ?= v0.30.0
 KUBECTL_VERSION ?= stable
 ACTIONLINT_VERSION ?= v1.7.12
+GITLEAKS_VERSION ?= v8.30.1
 COVERAGE_DIR ?= coverage
 COVERAGE_PROFILE ?= $(COVERAGE_DIR)/coverage.out
 COVERAGE_HTML ?= $(COVERAGE_DIR)/coverage.html
@@ -41,7 +42,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions secrets-scan deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -55,6 +56,7 @@ help:
 		'  make test-e2e           Compile e2e tests; skips unless RUN_KIND_E2E=1' \
 		'  make lint               Run gofmt, workflow lint, golangci-lint, and go vet' \
 		'  make lint-actions       Run GitHub Actions workflow lint' \
+		'  make secrets-scan       Scan committed Git history for leaked secrets' \
 		'  make smoke              Run local, Docker, and kind smoke checks' \
 		'  make smoke-local        Build local CLI and run smoke checks' \
 		'  make smoke-docker       Build container and run smoke checks' \
@@ -84,6 +86,7 @@ help:
 		'  GO_INSTALL_VERSION=$(GO_INSTALL_VERSION)' \
 		'  KIND_VERSION=$(KIND_VERSION)' \
 		'  KUBECTL_VERSION=$(KUBECTL_VERSION)' \
+		'  GITLEAKS_VERSION=$(GITLEAKS_VERSION)' \
 		'  COVERAGE_PROFILE=$(COVERAGE_PROFILE)' \
 		'  COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD)' \
 		'  E2E_REPOS=$(E2E_REPOS)' \
@@ -145,16 +148,23 @@ lint-actions:
 	fi
 	actionlint .github/workflows/*.yml
 
+secrets-scan:
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo 'gitleaks is required. Install it from https://github.com/gitleaks/gitleaks before publishing this repo.' >&2; \
+		exit 1; \
+	fi
+	gitleaks detect --source . --redact --no-banner
+
 deps: deps-tools deps-go-mod
 
 deps-tools:
-	GO_MIN_VERSION="$(GO_MIN_VERSION)" GO_INSTALL_VERSION="$(GO_INSTALL_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/install-dev-deps.sh
+	GO_MIN_VERSION="$(GO_MIN_VERSION)" GO_INSTALL_VERSION="$(GO_INSTALL_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" GITLEAKS_VERSION="$(GITLEAKS_VERSION)" sh scripts/install-dev-deps.sh
 
 deps-go-mod:
 	go mod download
 
 check-deps:
-	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" sh scripts/check-dev-deps.sh
+	@GO_MIN_VERSION="$(GO_MIN_VERSION)" KIND_VERSION="$(KIND_VERSION)" KUBECTL_VERSION="$(KUBECTL_VERSION)" GITLEAKS_VERSION="$(GITLEAKS_VERSION)" sh scripts/check-dev-deps.sh
 
 smoke: smoke-local smoke-docker smoke-k8s
 

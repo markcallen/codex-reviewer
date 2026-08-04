@@ -15,6 +15,13 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+      - id: secret-scan
+        name: Secret scan staged changes
+        entry: gitleaks protect --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
       - id: go-unit-tests
         name: Go unit tests with coverage
         entry: make coverage-check COVERAGE_THRESHOLD=75.0

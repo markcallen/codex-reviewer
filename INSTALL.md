@@ -49,10 +49,14 @@ Choose ChatGPT sign-in for subscription access, or API-key sign-in for usage-bas
 From this repository:
 
 ```bash
+cp .env.example .env
 make build
 ```
 
 The resulting binary contains the reviewer agent, Codex config, review checklist, prompts, and repository guidance.
+
+Only fill `.env` when you need credential-backed Docker or Kubernetes review
+flows. Real `.env` files are ignored and must not be committed.
 
 `make build` injects the version from `git describe --tags --always --dirty`. To build a release with an explicit tag:
 
