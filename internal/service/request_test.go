@@ -25,7 +25,7 @@ func TestBuildReviewRequestUsesExplicitValues(t *testing.T) {
 		t.Fatalf("BuildReviewRequest() error = %v", err)
 	}
 
-	if req.RepoURL != "git@github.com:org/repo.git" {
+	if req.RepoURL != "https://github.com/org/repo.git" {
 		t.Fatalf("RepoURL = %q", req.RepoURL)
 	}
 	if req.BaseRef != "main" || req.HeadRef != "feature" || req.HeadSHA != "abc123" {
@@ -163,8 +163,23 @@ func TestBuildReviewRequestScrubsCredentialedURL(t *testing.T) {
 	}
 }
 
-func TestBuildReviewRequestPreservesSSHUsername(t *testing.T) {
+func TestBuildReviewRequestConvertsGitHubSSHURL(t *testing.T) {
 	sshURL := "ssh://git@github.com/org/repo.git"
+	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
+		RepoURL:          sshURL,
+		HeadSHA:          "abc123",
+		RequireCleanTree: false,
+	})
+	if err != nil {
+		t.Fatalf("BuildReviewRequest() error = %v", err)
+	}
+	if req.RepoURL != "https://github.com/org/repo.git" {
+		t.Fatalf("RepoURL = %q", req.RepoURL)
+	}
+}
+
+func TestBuildReviewRequestPreservesNonGitHubSSHURL(t *testing.T) {
+	sshURL := "ssh://git@example.com/org/repo.git"
 	req, err := BuildReviewRequest(context.Background(), SubmitOptions{
 		RepoURL:          sshURL,
 		HeadSHA:          "abc123",
@@ -227,7 +242,7 @@ func TestBuildReviewRequestReadsGitDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildReviewRequest() error = %v", err)
 	}
-	if req.RepoURL != "git@github.com:org/repo.git" {
+	if req.RepoURL != "https://github.com/org/repo.git" {
 		t.Fatalf("RepoURL = %q", req.RepoURL)
 	}
 	if req.HeadRef != "HEAD" {

@@ -138,6 +138,39 @@ func TestAPIServerRecordsSubmittedTelemetryWithoutBlocking(t *testing.T) {
 	}
 }
 
+func TestAPIServerNormalizesGitHubSSHRepoURL(t *testing.T) {
+	applier := &fakeApplier{}
+	server, err := NewAPIServer(APIOptions{
+		JobOptions: JobOptions{
+			ReviewerImage:    "reviewer:test",
+			SidecarImage:     "sidecar:test",
+			OpenAISecretName: "openai-api",
+		},
+		Applier: applier,
+	})
+	if err != nil {
+		t.Fatalf("NewAPIServer() error = %v", err)
+	}
+	req := testReviewRequest(t)
+	req.RepoURL = "git@github.com:org/repo.git"
+	body, err := req.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodPost, "/reviews", strings.NewReader(string(body))))
+	if resp.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	manifest := string(applier.manifest)
+	if strings.Contains(manifest, "git@github.com:org/repo.git") {
+		t.Fatalf("manifest still contains SSH repo URL:\n%s", manifest)
+	}
+	if !strings.Contains(manifest, "https://github.com/org/repo.git") {
+		t.Fatalf("manifest missing normalized repo URL:\n%s", manifest)
+	}
+}
+
 func TestAPIServerHealthAndReadiness(t *testing.T) {
 	server, err := NewAPIServer(APIOptions{
 		JobOptions: JobOptions{

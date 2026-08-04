@@ -109,7 +109,7 @@ func TestRunServiceSubmitDryRunWritesOutput(t *testing.T) {
 	})
 
 	data := readFile(t, output)
-	for _, want := range []string{`"repo_url": "git@github.com:org/repo.git"`, `"base_ref": "origin/main"`, `"profile": "standard"`} {
+	for _, want := range []string{`"repo_url": "https://github.com/org/repo.git"`, `"base_ref": "origin/main"`, `"profile": "standard"`} {
 		if !strings.Contains(data, want) {
 			t.Fatalf("request missing %q:\n%s", want, data)
 		}
@@ -140,7 +140,7 @@ func TestRunReviewSubmitDryRunWithAPIURL(t *testing.T) {
 		})
 	})
 
-	for _, want := range []string{`"repo_url": "git@github.com:org/repo.git"`, `"base_ref": "origin/main"`, `"head_sha": "abc123"`} {
+	for _, want := range []string{`"repo_url": "https://github.com/org/repo.git"`, `"base_ref": "origin/main"`, `"head_sha": "abc123"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("request missing %q:\n%s", want, out)
 		}
@@ -170,7 +170,7 @@ func TestRunReviewSubmitDryRunPlansK8s(t *testing.T) {
 		})
 	})
 
-	if !strings.Contains(out, `"repo_url": "git@github.com:org/repo.git"`) || !strings.Contains(out, `"usage_estimate"`) {
+	if !strings.Contains(out, `"repo_url": "https://github.com/org/repo.git"`) || !strings.Contains(out, `"usage_estimate"`) {
 		t.Fatalf("dry-run output missing request or estimate:\n%s", out)
 	}
 }

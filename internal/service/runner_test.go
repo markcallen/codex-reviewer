@@ -132,7 +132,7 @@ func TestRunReviewJobRunsGitAndCodex(t *testing.T) {
 	debugLog := readFile(t, debugLogPath)
 	for _, want := range []string{
 		"run started review_id=review-1",
-		"repo_url=git@github.com:org/repo.git",
+		"repo_url=https://github.com/org/repo.git",
 		"command start",
 		"argv=codex exec review",
 		"run succeeded verdict=approve_with_fixes",

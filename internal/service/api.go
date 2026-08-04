@@ -105,6 +105,7 @@ func (s *APIServer) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ReviewResponse{Status: "rejected", Error: "decode request: " + err.Error()})
 		return
 	}
+	req.RepoURL = normalizeReviewRepoURL(req.RepoURL)
 	if req.ProfileName == "" {
 		req.ProfileName = "standard"
 	}
