@@ -17,7 +17,7 @@ repos:
 
       - id: secret-scan
         name: Secret scan staged changes
-        entry: gitleaks protect --staged --redact --no-banner
+        entry: make secrets-protect-staged
         language: system
         pass_filenames: false
         stages: [pre-commit]

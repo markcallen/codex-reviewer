@@ -50,6 +50,7 @@ From this repository:
 
 ```bash
 cp .env.example .env
+make deps
 make build
 ```
 
@@ -170,12 +171,12 @@ make docker-push-runner GHCR_IMAGE="$GHCR_IMAGE" GHCR_TAG="$GHCR_TAG"
 Run a review from the repository being reviewed:
 
 ```bash
-export OPENAI_API_KEY=...
+export CODEX_API_KEY=...
 export GITHUB_TOKEN=...
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
-  -e OPENAI_API_KEY \
+  -e CODEX_API_KEY \
   -e GITHUB_TOKEN \
   -v "$PWD:/workspace" \
   -w /workspace \

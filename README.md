@@ -28,7 +28,7 @@ For local development on this repository:
 
 ```bash
 cp .env.example .env
-make check-deps
+make deps
 make build
 make test
 ```

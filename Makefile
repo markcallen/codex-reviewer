@@ -42,7 +42,7 @@ E2E_GO_TEST_FLAGS ?= -v
 E2E_REPOS ?=
 E2E_SMALL_REPO ?= octocat/Hello-World
 
-.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions secrets-scan deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
+.PHONY: help setup build test coverage-check coverage-func coverage-html test-e2e lint lint-actions secrets-scan secrets-protect-staged deps deps-tools deps-go-mod check-deps check-e2e-deps setup-e2e k8s-namespace k8s-service-account helm-lint deploy-k8s install-k8s-skill smoke smoke-local smoke-docker smoke-k8s docker-build-runner docker-build-sidecar docker-tag-runner docker-tag-sidecar docker-push-runner docker-push-sidecar docker-push-images docker-pull-runner docker-run-ghcr kind-load-runner kind-load-sidecar kind-load-images e2e e2e-small clean clean-kind
 
 help:
 	@printf '%s\n' \
@@ -154,6 +154,13 @@ secrets-scan:
 		exit 1; \
 	fi
 	gitleaks detect --source . --redact --no-banner
+
+secrets-protect-staged:
+	@if ! command -v gitleaks >/dev/null 2>&1; then \
+		echo 'gitleaks is required. Run make deps before committing.' >&2; \
+		exit 1; \
+	fi
+	gitleaks protect --staged --redact --no-banner
 
 deps: deps-tools deps-go-mod
 

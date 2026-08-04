@@ -132,7 +132,14 @@ check_gitleaks() {
     return
   fi
   found="$(gitleaks version 2>/dev/null | head -1)"
-  print_check gitleaks "$found" "$GITLEAKS_VERSION" OK
+  found_num="${found#v}"
+  required_num="${GITLEAKS_VERSION#v}"
+  if version_ge "$found_num" "$required_num"; then
+    print_check gitleaks "$found" "${GITLEAKS_VERSION}+" OK
+  else
+    print_check gitleaks "$found" "${GITLEAKS_VERSION}+" FAIL
+    failed=1
+  fi
 }
 
 check_go
