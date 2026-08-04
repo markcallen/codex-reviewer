@@ -260,7 +260,9 @@ func runReviewCommands(ctx context.Context, opts RunnerOptions, req ReviewReques
 		return fmt.Errorf("sanitize repository remote: %w", err)
 	}
 	args := []string{
-		"exec", "review",
+		"exec",
+		"--sandbox", "danger-full-access",
+		"review",
 		"--json",
 		"--base", req.BaseRef,
 		"--model", req.Profile.Model,
