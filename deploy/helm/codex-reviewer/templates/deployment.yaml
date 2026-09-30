@@ -40,6 +40,9 @@ spec:
             - --reviewer-image={{ include "codex-reviewer.reviewerJobImage" . }}
             - --sidecar-image={{ include "codex-reviewer.sidecarImage" . }}
             - --service-account={{ include "codex-reviewer.serviceAccountName" . }}
+            {{- range $key, $value := .Values.reviewerJob.nodeSelector }}
+            - {{ printf "--node-selector=%s=%s" $key $value | quote }}
+            {{- end }}
             {{- if eq $authMode "codex" }}
             - --codex-auth-secret={{ required "auth.codexAuthSecret.name is required when auth.mode=codex" .Values.auth.codexAuthSecret.name }}
             - --codex-auth-secret-key={{ required "auth.codexAuthSecret.key is required when auth.mode=codex" .Values.auth.codexAuthSecret.key }}

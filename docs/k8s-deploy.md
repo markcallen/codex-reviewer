@@ -129,6 +129,20 @@ helm upgrade --install codex-reviewer deploy/helm/codex-reviewer \
   --set-string github.secret.name=github-token
 ```
 
+To place dynamically created review Jobs on a labeled node pool, set
+`reviewerJob.nodeSelector` in Helm values. This is separate from the chart's
+top-level `nodeSelector`, which places the API Deployment. For example:
+
+```yaml
+reviewerJob:
+  nodeSelector:
+    doks.digitalocean.com/node-pool: apps
+```
+
+With an empty map, review Jobs use normal Kubernetes scheduling. The API and
+`service job-manifest` commands also accept repeatable
+`--node-selector=key=value` flags.
+
 ## Local Access
 
 Port-forward the API:

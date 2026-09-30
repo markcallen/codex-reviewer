@@ -13,6 +13,7 @@ type JobOptions struct {
 	ReviewerImage         string
 	SidecarImage          string
 	ServiceAccount        string
+	NodeSelector          map[string]string
 	OpenAISecretName      string
 	OpenAISecretKey       string
 	CodexAuthSecretName   string
@@ -175,6 +176,9 @@ func JobManifest(req ReviewRequest, opts JobOptions) ([]byte, error) {
 	}
 	if opts.ServiceAccount != "" {
 		job["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["serviceAccountName"] = opts.ServiceAccount
+	}
+	if len(opts.NodeSelector) != 0 {
+		job["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["nodeSelector"] = opts.NodeSelector
 	}
 
 	data, err := json.MarshalIndent(job, "", "  ")
