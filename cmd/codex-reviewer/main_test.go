@@ -16,6 +16,23 @@ import (
 	"github.com/markcallen/codex-reviewer/internal/service"
 )
 
+func TestNodeSelectorFlag(t *testing.T) {
+	var selector nodeSelectorFlag
+	for _, entry := range []string{"doks.digitalocean.com/node-pool=apps", "kubernetes.io/os=linux"} {
+		if err := selector.Set(entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(selector) != 2 || selector["doks.digitalocean.com/node-pool"] != "apps" || selector["kubernetes.io/os"] != "linux" {
+		t.Fatalf("selector = %#v", selector)
+	}
+	for _, entry := range []string{"", "missing-equals", "=value", "key=with=equals"} {
+		if err := selector.Set(entry); err == nil {
+			t.Errorf("Set(%q) accepted invalid selector", entry)
+		}
+	}
+}
+
 func TestRunWorkflowRunDryRun(t *testing.T) {
 	runWorkflowRun([]string{
 		"--dry-run",
@@ -45,6 +62,8 @@ func TestRunServiceJobManifestWritesOutput(t *testing.T) {
 		"--reviewer-image", "reviewer:test",
 		"--sidecar-image", "sidecar:test",
 		"--openai-secret", "openai-api",
+		"--node-selector", "doks.digitalocean.com/node-pool=apps",
+		"--node-selector", "kubernetes.io/os=linux",
 		"--output", output,
 	})
 	runService([]string{
@@ -60,7 +79,7 @@ func TestRunServiceJobManifestWritesOutput(t *testing.T) {
 	})
 
 	data := readFile(t, output)
-	for _, want := range []string{`"kind": "Job"`, `"name": "codex-review-review-1"`, `"image": "reviewer:test"`} {
+	for _, want := range []string{`"kind": "Job"`, `"name": "codex-review-review-1"`, `"image": "reviewer:test"`, `"doks.digitalocean.com/node-pool": "apps"`, `"kubernetes.io/os": "linux"`} {
 		if !strings.Contains(data, want) {
 			t.Fatalf("manifest missing %q:\n%s", want, data)
 		}

@@ -27,6 +27,28 @@ var listenAndServe = http.ListenAndServe
 
 type stringListFlag []string
 
+type nodeSelectorFlag map[string]string
+
+func (f *nodeSelectorFlag) String() string {
+	if f == nil || *f == nil {
+		return ""
+	}
+	data, _ := json.Marshal(*f)
+	return string(data)
+}
+
+func (f *nodeSelectorFlag) Set(value string) error {
+	key, labelValue, ok := strings.Cut(value, "=")
+	if !ok || key == "" || strings.Contains(labelValue, "=") {
+		return fmt.Errorf("node selector must be key=value")
+	}
+	if *f == nil {
+		*f = make(map[string]string)
+	}
+	(*f)[key] = labelValue
+	return nil
+}
+
 func (f *stringListFlag) String() string {
 	return strings.Join(*f, ",")
 }
@@ -187,12 +209,14 @@ func runServiceTelemetry(args []string) {
 func runServiceAPI(args []string) {
 	var listen string
 	var jobOpts service.JobOptions
+	var nodeSelectors nodeSelectorFlag
 	fs := flag.NewFlagSet("service api", flag.ExitOnError)
 	fs.StringVar(&listen, "listen", ":8080", "HTTP listen address")
 	fs.StringVar(&jobOpts.Namespace, "namespace", "", "Kubernetes namespace for review jobs")
 	fs.StringVar(&jobOpts.ReviewerImage, "reviewer-image", "", "review runner image")
 	fs.StringVar(&jobOpts.SidecarImage, "sidecar-image", "", "OpenAI egress sidecar image")
 	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account for review jobs")
+	fs.Var(&nodeSelectors, "node-selector", "review Job node selector key=value; repeat for multiple labels")
 	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
 	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
 	fs.StringVar(&jobOpts.CodexAuthSecretName, "codex-auth-secret", "", "optional Kubernetes Secret containing Codex auth.json literal content in CODEX_AUTH")
@@ -211,6 +235,7 @@ func runServiceAPI(args []string) {
 		fs.Usage()
 		os.Exit(2)
 	}
+	jobOpts.NodeSelector = nodeSelectors
 	server, err := service.NewAPIServer(service.APIOptions{JobOptions: jobOpts})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "configure service api failed: %v\n", err)
@@ -257,6 +282,7 @@ func runServiceRunner(args []string) {
 func runServiceJobManifest(args []string) {
 	var submitOpts service.SubmitOptions
 	var jobOpts service.JobOptions
+	var nodeSelectors nodeSelectorFlag
 	var output string
 	fs := flag.NewFlagSet("service job-manifest", flag.ExitOnError)
 	fs.StringVar(&submitOpts.RepoURL, "repo-url", "", "repository URL; defaults to git remote.origin.url")
@@ -274,6 +300,7 @@ func runServiceJobManifest(args []string) {
 	fs.StringVar(&jobOpts.ReviewerImage, "reviewer-image", "", "review runner image")
 	fs.StringVar(&jobOpts.SidecarImage, "sidecar-image", "", "OpenAI egress sidecar image")
 	fs.StringVar(&jobOpts.ServiceAccount, "service-account", "", "Kubernetes service account")
+	fs.Var(&nodeSelectors, "node-selector", "review Job node selector key=value; repeat for multiple labels")
 	fs.StringVar(&jobOpts.OpenAISecretName, "openai-secret", "", "Kubernetes Secret containing the model API key")
 	fs.StringVar(&jobOpts.OpenAISecretKey, "openai-secret-key", "api-key", "Secret key containing the model API key")
 	fs.StringVar(&jobOpts.CodexAuthSecretName, "codex-auth-secret", "", "optional Kubernetes Secret containing Codex auth.json literal content in CODEX_AUTH")
@@ -295,6 +322,7 @@ func runServiceJobManifest(args []string) {
 	}
 
 	submitOpts.Dir = "."
+	jobOpts.NodeSelector = nodeSelectors
 	req, err := service.BuildReviewRequest(context.Background(), submitOpts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "build review request failed: %v\n", err)

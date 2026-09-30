@@ -107,6 +107,49 @@ func TestJobManifestValidatesRequiredInputs(t *testing.T) {
 	}
 }
 
+func TestJobManifestNodeSelector(t *testing.T) {
+	req := testReviewRequest(t)
+	base := JobOptions{
+		ReviewID:         "placement-review",
+		ReviewerImage:    "reviewer:test",
+		SidecarImage:     "egress:test",
+		OpenAISecretName: "openai-api",
+	}
+	data, err := JobManifest(req, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job struct {
+		Spec struct {
+			Template struct {
+				Spec map[string]any `json:"spec"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(data, &job); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := job.Spec.Template.Spec["nodeSelector"]; ok {
+		t.Fatal("default Job unexpectedly has nodeSelector")
+	}
+
+	base.NodeSelector = map[string]string{
+		"doks.digitalocean.com/node-pool": "apps",
+		"kubernetes.io/os":                "linux",
+	}
+	data, err = JobManifest(req, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &job); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := job.Spec.Template.Spec["nodeSelector"].(map[string]any)
+	if !ok || len(got) != 2 || got["doks.digitalocean.com/node-pool"] != "apps" || got["kubernetes.io/os"] != "linux" {
+		t.Fatalf("nodeSelector = %#v", job.Spec.Template.Spec["nodeSelector"])
+	}
+}
+
 func TestDNSLabelSanitizesReviewID(t *testing.T) {
 	got := dnsLabel(" Feature/ABC_123 ")
 	if got != "feature-abc-123" {
